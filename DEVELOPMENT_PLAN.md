@@ -58,9 +58,18 @@ auto-video/
     └── .gitkeep
 ```
 
-**Validation**:
+**Vérification**:
 ```bash
+# Vérifier que tous les fichiers existent
+find . -type f \( -name "*.py" -o -name "*.txt" -o -name "*.toml" \) | grep -v ".git" | wc -l
+
+# Doit retourner 31 fichiers
+
+# Vérifier l'import Python
 python -c "import auto_video; print('OK')"
+
+# Vérifier la structure des dossiers
+ls -la src/auto_video/{core,providers,ui,upload,config,utils}
 ```
 
 ---
@@ -137,10 +146,19 @@ strict = true
 testpaths = ["tests"]
 ```
 
-**Validation**:
+**Vérification**:
 ```bash
+# Installer les dépendances
 pip install -e ".[dev]"
+
+# Vérifier que l'installation fonctionne
+python -c "import auto_video; print(auto_video.__version__)"
+
+# Linter le code (doit avoir 0 erreur)
 ruff check .
+
+# Tester le script CLI
+auto-video --help
 ```
 
 ---
@@ -191,9 +209,25 @@ class AppConfig(BaseModel):
     default_lang: str = "fr"
 ```
 
-**Validation**:
+**Vérification**:
 ```bash
-pytest tests/test_config.py
+# Tester tous les schémas
+pytest tests/test_config.py -v
+
+# Vérifier la validation Pydantic
+python -c "
+from auto_video.config.schema import AppConfig
+from pathlib import Path
+
+# Test basique
+config = AppConfig(
+    llm={'provider': 'openai', 'model': 'gpt-4', 'api_key': 'test'},
+    tts={'mode': 'local', 'voice': 'default'},
+    visuals={'mode': 'stock', 'providers': ['pexels']},
+    storage={'videos_path': Path('/tmp/videos'), 'temp_path': Path('/tmp/temp')}
+)
+print('OK: Schema validation works')
+"
 ```
 
 ---
@@ -215,9 +249,35 @@ Fonctionnalités:
 - Support des variables d'environnement: `${OPENAI_API_KEY}`
 - Validation au chargement
 
-**Validation**:
+**Vérification**:
 ```bash
-pytest tests/test_config_loader.py
+# Tester le loader
+pytest tests/test_config_loader.py -v
+
+# Test manuel de sauvegarde/chargement
+python -c "
+from auto_video.config.schema import AppConfig
+from auto_video.config.loader import load_config, save_config
+from pathlib import Path
+import tempfile
+
+with tempfile.TemporaryDirectory() as tmpdir:
+    config_path = Path(tmpdir) / 'config.yaml'
+    
+    # Test création et sauvegarde
+    config = AppConfig(
+        llm={'provider': 'openai', 'model': 'gpt-4', 'api_key': 'test'},
+        tts={'mode': 'local', 'voice': 'default'},
+        visuals={'mode': 'stock', 'providers': ['pexels']},
+        storage={'videos_path': Path('/tmp/videos'), 'temp_path': Path('/tmp/temp')}
+    )
+    save_config(config, config_path)
+    
+    # Test chargement
+    loaded = load_config(config_path)
+    assert loaded.llm.provider == 'openai'
+    print('OK: Config loader works')
+"
 ```
 
 ---
@@ -256,9 +316,34 @@ class Workspace:
     def list_artifacts(self) -> dict[str, Path]: ...
 ```
 
-**Validation**:
+**Vérification**:
 ```bash
-pytest tests/test_workspace.py
+# Tester le workspace
+pytest tests/test_workspace.py -v
+
+# Test manuel
+python -c "
+from auto_video.utils.workspace import Workspace
+from pathlib import Path
+import tempfile
+
+with tempfile.TemporaryDirectory() as tmpdir:
+    ws = Workspace(Path(tmpdir), 'test_video_001')
+    ws.create()
+    
+    # Vérifier les chemins
+    assert ws.script_path.exists()
+    assert ws.audio_path.exists()
+    assert ws.video_raw_path.exists()
+    
+    # Vérifier list_artifacts
+    artifacts = ws.list_artifacts()
+    assert 'script' in artifacts
+    assert 'audio' in artifacts
+    
+    ws.cleanup()
+    print('OK: Workspace works')
+"
 ```
 
 ---
@@ -288,10 +373,24 @@ Fonctionnalités:
 4. Si Local: Ollama ou chemin modèle
 5. Test de connexion avec prompt simple
 
-**Validation**:
+**Vérification**:
 ```bash
+# Lancer le wizard et tester les chemins
 auto-video setup
-# Tester manuellement le wizard LLM
+
+# Vérifier que la config a été créée
+cat ~/.config/auto-video/config.yaml
+
+# Vérifier les champs LLM
+python -c "
+from auto_video.config.loader import load_config
+from pathlib import Path
+
+config = load_config(Path.home() / '.config' / 'auto-video' / 'config.yaml')
+assert config.llm.provider in ['openai', 'anthropic', 'groq', 'google', 'ollama', 'llamacpp']
+assert config.llm.model is not None
+print('OK: LLM config is valid')
+"
 ```
 
 ---
@@ -311,6 +410,24 @@ auto-video setup
 4. Chemin dossier temp
 5. Validation des chemins (création si nécessaire)
 
+**Vérification**:
+```bash
+# Après setup, vérifier que les dossiers existent
+ls -la ~/Videos/auto-videos
+ls -la ~/.cache/auto-video/temp
+
+# Vérifier la config
+python -c "
+from auto_video.config.loader import load_config
+from pathlib import Path
+
+config = load_config(Path.home() / '.config' / 'auto-video' / 'config.yaml')
+assert config.storage.videos_path.exists()
+assert config.storage.temp_path.exists()
+print('OK: Storage paths are valid')
+"
+```
+
 ---
 
 ### Étape 1.6: Setup Wizard - Phase 3 (Visuels)
@@ -324,14 +441,30 @@ auto-video setup
 Écrans:
 1. Mode principal: Stock API / Local / Généré / Hybride
 2. Si Stock API:
-   - Configurer Pexels (clé API)
-   - Configurer Pixabay (clé API)
-   - Préférence et qualité
+    - Configurer Pexels (clé API)
+    - Configurer Pixabay (clé API)
+    - Préférence et qualité
 3. Si Local:
-   - Chemin du dossier
-   - Scan et affichage du contenu détecté
+    - Chemin du dossier
+    - Scan et affichage du contenu détecté
 4. Si Généré:
-   - Voir Étape 1.7
+    - Voir Étape 1.7
+
+**Vérification**:
+```bash
+# Vérifier la config des visuels
+python -c "
+from auto_video.config.loader import load_config
+from pathlib import Path
+
+config = load_config(Path.home() / '.config' / 'auto-video' / 'config.yaml')
+assert config.visuals.mode in ['stock', 'local', 'generated', 'hybrid']
+if config.visuals.mode == 'stock':
+    assert len(config.visuals.providers) > 0
+    assert 'pexels' in config.visuals.providers or 'pixabay' in config.visuals.providers
+print('OK: Visuals config is valid')
+"
+```
 
 ---
 
@@ -354,6 +487,21 @@ Images:
 3. Si Local: modèle, LoRA, steps, GPU
 4. Test rapide de génération
 
+**Vérification**:
+```bash
+# Vérifier la config TTS et Images
+python -c "
+from auto_video.config.loader import load_config
+from pathlib import Path
+
+config = load_config(Path.home() / '.config' / 'auto-video' / 'config.yaml')
+assert config.tts.mode in ['local', 'api', 'hybrid']
+assert config.tts.voice is not None
+print('OK: TTS config is valid')
+print('Images:', 'enabled' if hasattr(config, 'image_gen') and config.image_gen else 'not configured')
+"
+```
+
 ---
 
 ### Étape 1.8: Setup Wizard - Phase 5 (Prompts)
@@ -369,9 +517,22 @@ Fichiers: `prompts/general.txt`, `prompts/targeted.txt`, `prompts/image.txt`
 Écrans:
 1. Menu: Voir prompt général / ciblé / image / Tous par défaut
 2. Pour chaque:
-   - Afficher le prompt actuel
-   - Option: Éditer (ouvre éditeur $EDITOR)
-   - Option: Réinitialiser par défaut
+    - Afficher le prompt actuel
+    - Option: Éditer (ouvre éditeur $EDITOR)
+    - Option: Réinitialiser par défaut
+
+**Vérification**:
+```bash
+# Vérifier que les fichiers de prompts existent
+ls -la prompts/*.txt
+
+# Vérifier le contenu
+head -n 5 prompts/general.txt
+echo "---"
+head -n 5 prompts/targeted.txt
+echo "---"
+head -n 5 prompts/image.txt
+```
 
 ---
 
@@ -389,9 +550,24 @@ Fichiers: `prompts/general.txt`, `prompts/targeted.txt`, `prompts/image.txt`
 2. Validation du fichier
 3. Premier flux OAuth (ouverture navigateur)
 4. Paramètres par défaut:
-   - Privacy: public/unlisted/private
-   - Catégorie
-   - Tags auto: oui/non
+    - Privacy: public/unlisted/private
+    - Catégorie
+    - Tags auto: oui/non
+
+**Vérification**:
+```bash
+# Vérifier que le fichier credentials existe
+ls -la ~/.config/auto-video/credentials.json
+
+# Vérifier la config YouTube dans le fichier principal
+python -c "
+from auto_video.config.loader import load_config
+from pathlib import Path
+
+config = load_config(Path.home() / '.config' / 'auto-video' / 'config.yaml')
+print('YouTube config:', 'present' if hasattr(config, 'youtube') else 'not found')
+"
+```
 
 ---
 
@@ -406,11 +582,34 @@ Fichiers: `prompts/general.txt`, `prompts/targeted.txt`, `prompts/image.txt`
 Écrans:
 1. Affichage résumé complet
 2. Options:
-   - Confirmer et sauvegarder
-   - Modifier une section (retour à l'étape)
-   - Annuler
+    - Confirmer et sauvegarder
+    - Modifier une section (retour à l'étape)
+    - Annuler
 3. Sauvegarde dans `~/.config/auto-video/config.yaml`
 4. Message de succès
+
+**Vérification**:
+```bash
+# Vérifier que la config finale est valide
+python -c "
+from auto_video.config.loader import load_config
+from auto_video.config.schema import AppConfig
+from pathlib import Path
+
+config = load_config(Path.home() / '.config' / 'auto-video' / 'config.yaml')
+assert isinstance(config, AppConfig)
+assert config.llm.provider is not None
+assert config.tts.mode is not None
+assert config.visuals.mode is not None
+assert config.default_format in ['short', 'long']
+assert config.default_lang is not None
+print('OK: Complete config is valid')
+print('Config loaded successfully!')
+print(' - LLM:', config.llm.provider, config.llm.model)
+print(' - TTS:', config.tts.mode, config.tts.voice)
+print(' - Visuals:', config.visuals.mode)
+"
+```
 
 ---
 
@@ -441,6 +640,19 @@ class LLM:
     def generate_image_prompt(self, context: str) -> str: ...
 ```
 
+**Vérification**:
+```bash
+# Vérifier que l'interface est bien définie
+python -c "
+from auto_video.core.llm import LLMProvider
+from abc import ABC
+
+assert issubclass(LLMProvider, ABC)
+print('OK: LLMProvider is an abstract base class')
+print('Abstract methods:', [m for m in dir(LLMProvider) if not m.startswith('_')])
+"
+```
+
 ---
 
 ### Étape 2.2: Module LLM - Providers API
@@ -465,9 +677,19 @@ Avec:
 - Rate limiting
 - Logging
 
-**Validation**:
+**Vérification**:
 ```bash
-pytest tests/providers/test_llm_providers.py -m "api"
+# Tester les providers API
+pytest tests/providers/test_llm_providers.py -m "api" -v
+
+# Vérifier que tous les providers sont importables
+python -c "
+from auto_video.providers.llm.openai import OpenAIProvider
+from auto_video.providers.llm.anthropic import AnthropicProvider
+from auto_video.providers.llm.groq import GroqProvider
+from auto_video.providers.llm.google import GoogleProvider
+print('OK: All API providers are importable')
+"
 ```
 
 ---
@@ -491,9 +713,21 @@ Avec:
 - Health check
 - Gestion des timeouts
 
-**Validation**:
+**Vérification**:
 ```bash
-pytest tests/providers/test_llm_providers.py -m "local"
+# Tester les providers local
+pytest tests/providers/test_llm_providers.py -m "local" -v
+
+# Vérifier que les providers local sont importables
+python -c "
+from auto_video.providers.llm.ollama import OllamaProvider
+print('OK: Ollama provider is importable')
+try:
+    from auto_video.providers.llm.llamacpp import LlamaCppProvider
+    print('OK: LlamaCpp provider is importable')
+except ImportError:
+    print('LlamaCpp provider not implemented (optional)')
+"
 ```
 
 ---
@@ -521,6 +755,18 @@ class TTS:
     def get_available_voices(self) -> list[str]: ...
 ```
 
+**Vérification**:
+```bash
+# Vérifier que l'interface TTS est bien définie
+python -c "
+from auto_video.core.tts import TTSProvider
+from abc import ABC
+
+assert issubclass(TTSProvider, ABC)
+print('OK: TTSProvider is an abstract base class')
+"
+```
+
 ---
 
 ### Étape 2.5: Module TTS - Kokoro Local
@@ -545,9 +791,25 @@ Fonctionnalités:
 pip install torch scipy
 ```
 
-**Validation**:
+**Vérification**:
 ```bash
-pytest tests/providers/test_tts_kokoro.py
+# Tester Kokoro
+pytest tests/providers/test_tts_kokoro.py -v
+
+# Test rapide de génération audio
+python -c "
+from auto_video.providers.tts.kokoro import KokoroProvider
+from pathlib import Path
+import tempfile
+
+with tempfile.TemporaryDirectory() as tmpdir:
+    provider = KokoroProvider()
+    output = Path(tmpdir) / 'test.wav'
+    duration = provider.synthesize('Hello world', output, voice='default')
+    assert duration > 0
+    assert output.exists()
+    print(f'OK: Audio generated, duration: {duration}s')
+"
 ```
 
 ---
@@ -569,9 +831,17 @@ Avec:
 - Retry
 - Cache des requêtes identiques
 
-**Validation**:
+**Vérification**:
 ```bash
-pytest tests/providers/test_tts_api.py -m "api"
+# Tester les providers API TTS
+pytest tests/providers/test_tts_api.py -m "api" -v
+
+# Vérifier que les providers sont importables
+python -c "
+from auto_video.providers.tts.elevenlabs import ElevenLabsProvider
+from auto_video.providers.tts.openai_tts import OpenAITTSProvider
+print('OK: All TTS API providers are importable')
+"
 ```
 
 ---
@@ -601,6 +871,20 @@ class StockManager:
     def get_clips_for_script(self, script: str, keywords: list[str], total_duration: float) -> list[Path]: ...
 ```
 
+**Vérification**:
+```bash
+# Vérifier que les providers de stock footage sont importables
+python -c "
+from auto_video.providers.stock.pexels import PexelsProvider
+from auto_video.providers.stock.pixabay import PixabayProvider
+from auto_video.providers.stock.base import StockProvider
+from abc import ABC
+
+assert issubclass(StockProvider, ABC)
+print('OK: Stock providers are importable')
+"
+```
+
 ---
 
 ### Étape 2.8: Module Video - Local Assets
@@ -627,6 +911,25 @@ Fonctionnalités:
 - Distribution aléatoire
 - Répétition si durée insuffisante
 - Ken Burns effect pour les images
+
+**Vérification**:
+```bash
+# Tester le scan d'assets locaux
+python -c "
+from auto_video.core.video import LocalAssetsManager
+from pathlib import Path
+
+# Créer un dossier de test
+test_dir = Path('/tmp/test_assets')
+test_dir.mkdir(exist_ok=True)
+(test_dir / 'test.mp4').touch()
+(test_dir / 'test.jpg').touch()
+
+manager = LocalAssetsManager(test_dir, include_subdirs=False)
+assets = manager.scan_assets()
+print(f'OK: Scanned {len(assets)} assets')
+"
+```
 
 ---
 
@@ -667,9 +970,23 @@ ffmpeg -i video.mp4 -i audio.wav -c:v copy -c:a aac -map 0:v:0 -map 1:a:0 output
 ffmpeg -i input.mp4 -vf "scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2" output.mp4
 ```
 
-**Validation**:
+**Vérification**:
 ```bash
-pytest tests/test_video_composer.py
+# Vérifier que FFmpeg est installé
+ffmpeg -version
+
+# Tester le VideoComposer
+pytest tests/test_video_composer.py -v
+
+# Test manuel de concaténation
+python -c "
+from auto_video.core.video import VideoComposer
+from pathlib import Path
+
+composer = VideoComposer()
+print('OK: VideoComposer initialized')
+print('FFmpeg path:', composer.ffmpeg_path)
+"
 ```
 
 ---
@@ -710,9 +1027,17 @@ Commande FFmpeg pour burn:
 ffmpeg -i video.mp4 -vf "subtitles=subs.srt:force_style='FontSize=24,PrimaryColour=&HFFFFFF'" output.mp4
 ```
 
-**Validation**:
+**Vérification**:
 ```bash
-pytest tests/test_subtitles.py
+# Tester les sous-titres
+pytest tests/test_subtitles.py -v
+
+# Vérifier que Whisper fonctionne
+python -c "
+from auto_video.core.subtitles import SubtitleGenerator
+print('OK: SubtitleGenerator initialized')
+print('Available models: base, small, medium, large')
+"
 ```
 
 ---
@@ -745,6 +1070,16 @@ Fichier: `src/auto_video/providers/image/zimage.py`
 class ZImageProvider:
     def __init__(self, model: str = "Z-Image/Z-Image-Turbo", lora: str | None = None): ...
     def generate(self, prompt: str, steps: int = 6) -> Image: ...
+```
+
+**Vérification**:
+```bash
+# Vérifier que Z-Image provider est importable
+python -c "
+from auto_video.core.thumbnail import ThumbnailGenerator
+from auto_video.providers.image.zimage import ZImageProvider
+print('OK: ThumbnailGenerator and ZImageProvider are importable')
+"
 ```
 
 ---
@@ -787,9 +1122,16 @@ Avec:
 - Gestion des erreurs et retry
 - Vérification quota
 
-**Validation**:
+**Vérification**:
 ```bash
-pytest tests/test_youtube.py -m "youtube"
+# Tester l'upload YouTube
+pytest tests/test_youtube.py -m "youtube" -v
+
+# Vérifier que le uploader est importable
+python -c "
+from auto_video.upload.youtube import YouTubeUploader
+print('OK: YouTubeUploader is importable')
+"
 ```
 
 ---
@@ -842,6 +1184,19 @@ class VideoPipeline:
     def get_progress(self) -> PipelineProgress: ...
 ```
 
+**Vérification**:
+```bash
+# Vérifier que le pipeline est importable
+python -c "
+from auto_video.core.pipeline import VideoPipeline, PipelineStep, PipelineResult
+from enum import Enum
+
+assert issubclass(PipelineStep, Enum)
+print('OK: VideoPipeline and PipelineStep are importable')
+print('Steps:', [s.name for s in PipelineStep])
+"
+```
+
 ---
 
 ### Étape 3.2: TUI Progress Display
@@ -879,6 +1234,15 @@ Avec Rich:
 - `Progress` pour les barres
 - `Live` pour le refresh
 - Scroll sur le panel détails
+
+**Vérification**:
+```bash
+# Vérifier que l'UI de progression est importable
+python -c "
+from auto_video.ui.progress import ProgressDisplay
+print('OK: ProgressDisplay is importable')
+"
+```
 
 ---
 
@@ -924,6 +1288,20 @@ def main():
     # ...
 ```
 
+**Vérification**:
+```bash
+# Vérifier que toutes les commandes CLI fonctionnent
+auto-video --help
+auto-video setup --help
+auto-video create --help
+auto-video resume --help
+auto-video config --help
+auto-video models --help
+
+# Tester la commande de version
+python -m auto_video --version
+```
+
 ---
 
 ### Étape 3.4: Error Recovery
@@ -960,6 +1338,38 @@ class StateManager:
     def list_incomplete(self) -> list[PipelineState]: ...
 ```
 
+**Vérification**:
+```bash
+# Vérifier que la gestion d'état fonctionne
+python -c "
+from auto_video.core.pipeline import StateManager, PipelineState
+from pathlib import Path
+import tempfile
+
+with tempfile.TemporaryDirectory() as tmpdir:
+    # Test de sauvegarde/chargement
+    state = PipelineState(
+        video_id='test_001',
+        title='Test Video',
+        format='long',
+        lang='fr',
+        current_step=1,
+        completed_steps=[],
+        artifacts={},
+        errors=[],
+        created_at='2024-01-01T00:00:00',
+        updated_at='2024-01-01T00:00:00'
+    )
+    
+    manager = StateManager(base_path=Path(tmpdir))
+    manager.save(state)
+    
+    loaded = manager.load('test_001')
+    assert loaded.video_id == 'test_001'
+    print('OK: StateManager works')
+"
+```
+
 ---
 
 ### Étape 3.5: Logging System
@@ -989,6 +1399,18 @@ Format de log:
 2024-01-15 10:30:45 [INFO] auto_video.core.pipeline: [abc123] Starting pipeline
 2024-01-15 10:30:46 [INFO] auto_video.core.llm: [abc123] Generating script with gpt-4-turbo
 2024-01-15 10:30:52 [INFO] auto_video.core.llm: [abc123] Script generated: 523 tokens
+```
+
+**Vérification**:
+```bash
+# Vérifier que le système de logging fonctionne
+python -c "
+from auto_video.utils.logging import setup_logging, VideoLogger
+from pathlib import Path
+
+setup_logging(verbose=True)
+print('OK: Logging system initialized')
+"
 ```
 
 ---
@@ -1027,6 +1449,15 @@ def test_full_pipeline_mock(mock_providers, tmp_path):
     assert result.status == "success"
 ```
 
+**Vérification**:
+```bash
+# Tester tous les tests d'intégration
+pytest tests/test_integration.py -v
+
+# Tester avec coverage
+pytest tests/test_integration.py --cov=auto_video --cov-report=term
+```
+
 ---
 
 ### Étape 4.2: Documentation Utilisateur
@@ -1049,6 +1480,22 @@ Ajouter `docs/ADVANCED.md`:
 - Création de prompts personnalisés
 - Ajout de providers custom
 - Performance tuning
+
+**Vérification**:
+```bash
+# Vérifier que la documentation existe
+ls -la README.md
+ls -la docs/ADVANCED.md
+
+# Vérifier le contenu
+head -n 20 README.md
+head -n 20 docs/ADVANCED.md
+
+# Vérifier les liens Markdown (si possible)
+# ou simplement vérifier que les fichiers lisibles
+cat README.md | wc -l
+cat docs/ADVANCED.md | wc -l
+```
 
 ---
 
@@ -1073,6 +1520,22 @@ async def download_clips_parallel(clips: list[ClipInfo]) -> list[Path]:
     async with httpx.AsyncClient() as client:
         tasks = [download_clip(client, clip) for clip in clips]
         return await asyncio.gather(*tasks)
+```
+
+**Vérification**:
+```bash
+# Vérifier que le code passe les tests de performance
+pytest tests/test_performance.py -v
+
+# Vérifier que le code est optimisé (profiling si nécessaire)
+python -c "
+import time
+print('Test de performance basique')
+start = time.time()
+# Ajouter test de performance ici
+elapsed = time.time() - start
+print(f'Temps: {elapsed:.2f}s')
+"
 ```
 
 ---
@@ -1110,6 +1573,19 @@ __pycache__/
 .cache/
 ```
 
+**Vérification**:
+```bash
+# Vérifier que .gitignore existe et est complet
+cat .gitignore | grep -E "(\.env|credentials|\.mp4|__pycache__|\.cache)"
+
+# Vérifier qu'aucun secret n'est commité
+git log --all --full-history --source -- "*credentials*" "*secret*" "*.env"
+
+# Scanner les fichiers pour détecter d'éventuels secrets
+# (optionnel: utiliser un outil comme git-secrets ou trufflehog)
+echo "Vérification manuelle des secrets recommandée"
+```
+
 ---
 
 ### Étape 4.5: Release Preparation
@@ -1125,6 +1601,32 @@ __pycache__/
 - Tag git `v1.0.0`
 - Build PyPI: `python -m build`
 - Documentation finale
+
+**Vérification**:
+```bash
+# Vérifier la version
+cat pyproject.toml | grep version
+
+# Vérifier le changelog
+ls -la CHANGELOG.md
+head -n 20 CHANGELOG.md
+
+# Vérifier le tag git
+git tag -l | grep v1.0.0
+
+# Tester le build
+python -m build
+
+# Vérifier que tous les tests passent
+pytest -v
+
+# Vérifier le linting
+ruff check .
+mypy src/
+
+# Vérifier que la CLI fonctionne
+auto-video --version
+```
 
 ---
 
