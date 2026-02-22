@@ -1735,7 +1735,7 @@ auto-video --version
 
 ✓ Étape 1.6: Setup Wizard Visuels (complété)
 - ✓ VisualsSetupWizard class pour configuration visuels
-- ✓ Sélection mode (Stock API/Local/Generated/Hybrid)
+- ✓ Sélection mode (Stock API/Local/Generated/Hybride)
 - ✓ Configuration providers stock (Pexels, Pixabay) avec clés API
 - ✓ Configuration assets locaux avec validation chemin
 - ✓ Mode hybride combinant plusieurs sources
@@ -1743,7 +1743,18 @@ auto-video --version
 - ✓ 21 tests, tous passants
 - ✓ Filtrage providers pour exclure None
 
-**Prochaine étape**: Étape 1.7 - Créer le wizard TTS + Images (ui/setup.py étendu)
+✓ Étape 1.7: Setup Wizard TTS + Images (complété)
+- ✓ TTSImageSetupWizard class pour configuration TTS et Images
+- ✓ Sélection mode TTS (Local/API/Hybride)
+- ✓ Sélection provider TTS (ElevenLabs, OpenAI TTS)
+- ✓ Sélection voix TTS
+- ✓ Configuration génération images (Local Z-Image/API)
+- ✓ Test génération images (optionnel)
+- ✓ _get_api_key() comme fonction utilitaire partagée
+- ✓ show_summary() pour TTS et Images configs
+- ✓ Import tempfile pour test fixtures
+
+**Prochaine étape**: Étape 1.8 - Créer le wizard Prompts (ui/setup.py étendu)
 
 ---
 
