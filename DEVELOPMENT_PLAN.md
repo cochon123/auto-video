@@ -1682,7 +1682,15 @@ auto-video --version
 - ✓ Configuration ruff, mypy, pytest ajoutée
 - ✓ Script CLI 'auto-video' configuré
 
-**Prochaine étape**: Étape 1.1 - Créer les schémas de configuration Pydantic (config/schema.py)
+**Phase 1: Configuration et Setup** - **En cours (10% complet)**
+
+✓ Étape 1.1: Schema de Configuration (complété)
+- ✓ LLMProviderConfig, TTSConfig, ImageGenConfig
+- ✓ VisualsConfig, StorageConfig, YouTubeConfig
+- ✓ AppConfig avec validation Pydantic
+- ✓ 11 tests, tous passants
+
+**Prochaine étape**: Étape 1.2 - Créer le loader de configuration (config/loader.py)
 
 ---
 
