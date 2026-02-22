@@ -1166,19 +1166,21 @@ __pycache__/
 
 ## Progression Actuelle
 
-**Phase 0: Initialisation du Projet** - **En cours (70% complet)**
+**Phase 0: Initialisation du Projet** - **✓ Terminé (100% complet)**
 
-✓ Étape 0.1: Documentation et structure (complété)
+✓ Étape 0.1: Structure de base (complété)
 - ✓ Documentation créée (README, ARCHITECTURE, PIPELINE, MODELS, API, SETUP, DEVELOPMENT)
 - ✓ DEVELOPMENT_PLAN.md créé (26 étapes en 5 phases)
 - ✓ Repository Git initialisé (.gitignore, commit initial)
-- ✗ Structure de dossiers de code Python (à faire)
+- ✓ Structure de dossiers de code Python créée (src, tests, prompts, assets)
+- ✓ Fichiers placeholder ajoutés pour tous les modules
 
-○ Étape 0.2: Configuration Python (à démarrer)
-- ⏸️ pyproject.toml à créer
-- ⏸️ Dépendances à définir
+✓ Étape 0.2: Configuration Python (complété)
+- ✓ pyproject.toml créé avec toutes les dépendances
+- ✓ Configuration ruff, mypy, pytest ajoutée
+- ✓ Script CLI 'auto-video' configuré
 
-**Prochaine étape**: Créer l'arborescence de dossiers du projet Python et le fichier pyproject.toml (Étape 0.1 complète)
+**Prochaine étape**: Étape 1.1 - Créer les schémas de configuration Pydantic (config/schema.py)
 
 ---
 
