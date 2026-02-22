@@ -1682,7 +1682,7 @@ auto-video --version
 - ✓ Configuration ruff, mypy, pytest ajoutée
 - ✓ Script CLI 'auto-video' configuré
 
-**Phase 1: Configuration et Setup** - **En cours (10% complet)**
+**Phase 1: Configuration et Setup** - **En cours (20% complet)**
 
 ✓ Étape 1.1: Schema de Configuration (complété)
 - ✓ LLMProviderConfig, TTSConfig, ImageGenConfig
@@ -1690,7 +1690,15 @@ auto-video --version
 - ✓ AppConfig avec validation Pydantic
 - ✓ 11 tests, tous passants
 
-**Prochaine étape**: Étape 1.2 - Créer le loader de configuration (config/loader.py)
+✓ Étape 1.2: Loader de Configuration (complété)
+- ✓ load_config() avec parsing YAML
+- ✓ save_config() avec sérialisation YAML
+- ✓ Substitution de variables d'environnement (${VAR})
+- ✓ Conversion automatique des chemins Path
+- ✓ get_default_config_path() et create_default_config()
+- ✓ 12 tests, tous passants
+
+**Prochaine étape**: Étape 1.3 - Créer le gestionnaire de workspace (utils/workspace.py)
 
 ---
 
