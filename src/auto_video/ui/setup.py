@@ -8,7 +8,7 @@ from rich.panel import Panel
 from rich.prompt import Confirm, Prompt
 from rich.table import Table
 
-from auto_video.config.schema import LLMProviderConfig, StorageConfig
+from auto_video.config.schema import LLMProviderConfig, StorageConfig, VisualsConfig
 
 
 @dataclass
@@ -521,5 +521,247 @@ class StorageSetupWizard:
                 f"[bold]Temp Path:[/bold] {config.temp_path}\n"
                 f"[bold]Keep Temp Files:[/bold] {config.keep_temp}",
                 title="[green]Storage Configuration Summary[/green]",
+            )
+        )
+
+
+@dataclass
+class VisualsSetupResult:
+    """Result of visuals setup wizard."""
+
+    config: VisualsConfig | None
+    success: bool
+    message: str
+
+
+class VisualsSetupWizard:
+    """Wizard for setting up visuals configuration."""
+
+    def __init__(self, console: Console | None = None) -> None:
+        """Initialize wizard.
+
+        Args:
+            console: Rich console instance. If None, creates a new one.
+        """
+        self.console = console or Console()
+
+    def run(self) -> VisualsSetupResult:
+        """Run visuals setup wizard.
+
+        Returns:
+            Setup result with configuration.
+        """
+        self._show_welcome()
+
+        mode = self._select_mode()
+
+        if mode == "stock":
+            config = self._setup_stock_api()
+        elif mode == "local":
+            config = self._setup_local()
+        elif mode == "generated":
+            self.console.print(
+                "[yellow]Generated visuals will be configured in "
+                "Step 1.7 (TTS + Images wizard)[/yellow]"
+            )
+            config = VisualsConfig(mode="generated")
+        else:
+            config = self._setup_hybrid()
+
+        if not config:
+            return VisualsSetupResult(config=None, success=False, message="Setup cancelled")
+
+        self._show_summary(config)
+        return VisualsSetupResult(
+            config=config, success=True, message="Visuals configured successfully"
+        )
+
+    def _show_welcome(self) -> None:
+        """Display welcome screen."""
+        self.console.print(
+            Panel.fit(
+                "[bold blue]Visuals Configuration Wizard[/bold blue]\n\n"
+                "This wizard will help you configure the source of "
+                "visuals for your videos (stock footage, local assets, "
+                "or AI-generated images).",
+                title="Auto-Video Setup",
+            )
+        )
+        self.console.print()
+
+    def _select_mode(self) -> str:
+        """Select visuals mode.
+
+        Returns:
+            Selected mode.
+        """
+        self.console.print("[bold]Select Visuals Mode:[/bold]")
+        self.console.print()
+
+        choices = [
+            "1. Stock Footage API (Pexels, Pixabay)",
+            "2. Local Assets (your video/image folders)",
+            "3. AI Generated Images",
+            "4. Hybrid (combine multiple sources)",
+        ]
+
+        for choice in choices:
+            self.console.print(f"  {choice}")
+
+        while True:
+            self.console.print()
+            selection = Prompt.ask(
+                "Select mode",
+                choices=["1", "2", "3", "4"],
+                default="1",
+            )
+
+            if selection == "1":
+                return "stock"
+            elif selection == "2":
+                return "local"
+            elif selection == "3":
+                return "generated"
+            else:
+                return "hybrid"
+
+    def _setup_stock_api(self) -> VisualsConfig | None:
+        """Setup stock footage API providers.
+
+        Returns:
+            Visuals configuration or None if cancelled.
+        """
+        self.console.print("[bold]Configure Stock Footage Providers[/bold]")
+        self.console.print()
+
+        providers = []
+
+        pexels = self._setup_pexels()
+        if pexels:
+            providers.append(pexels)
+
+        pixabay = self._setup_pixabay()
+        if pixabay:
+            providers.append(pixabay)
+
+        if not providers:
+            return None
+
+        return VisualsConfig(mode="stock", providers=providers)
+
+    def _setup_pexels(self) -> str | None:
+        """Setup Pexels provider.
+
+        Returns:
+            Provider name if enabled, None otherwise.
+        """
+        if not Confirm.ask(
+            "Enable Pexels (free stock footage)?",
+            default=True,
+        ):
+            return None
+
+        api_key = Prompt.ask(
+            "Enter Pexels API key",
+            password=True,
+        )
+
+        if not api_key:
+            self.console.print("[red]API key cannot be empty[/red]")
+            return None
+
+        return "pexels"
+
+    def _setup_pixabay(self) -> str | None:
+        """Setup Pixabay provider.
+
+        Returns:
+            Provider name if enabled, None otherwise.
+        """
+        if not Confirm.ask(
+            "Enable Pixabay (free stock footage)?",
+            default=True,
+        ):
+            return None
+
+        api_key = Prompt.ask(
+            "Enter Pixabay API key",
+            password=True,
+        )
+
+        if not api_key:
+            self.console.print("[red]API key cannot be empty[/red]")
+            return None
+
+        return "pixabay"
+
+    def _setup_local(self) -> VisualsConfig | None:
+        """Setup local assets.
+
+        Returns:
+            Visuals configuration or None if cancelled.
+        """
+        path_str = Prompt.ask(
+            "Enter path to your local assets folder",
+            default=str(Path.home() / "Videos" / "assets"),
+        )
+
+        path = Path(path_str).expanduser()
+
+        if not path.exists():
+            self.console.print(f"[red]✗ Path does not exist: {path}[/red]")
+            if not Confirm.ask("Continue anyway?", default=False):
+                return None
+
+        if path.exists() and not path.is_dir():
+            self.console.print(f"[red]✗ Path is not a directory: {path}[/red]")
+            return None
+
+        return VisualsConfig(mode="local", local_path=str(path))
+
+    def _setup_hybrid(self) -> VisualsConfig | None:
+        """Setup hybrid mode (combine sources).
+
+        Returns:
+            Visuals configuration or None if cancelled.
+        """
+        self.console.print(
+            "[yellow]Hybrid mode: Combine stock footage, local assets, "
+            "and generated images[/yellow]"
+        )
+        self.console.print()
+
+        stock_config = self._setup_stock_api()
+        local_config = self._setup_local()
+
+        providers = []
+        local_path = None
+
+        if stock_config:
+            providers = stock_config.providers or []
+
+        if local_config:
+            local_path = local_config.local_path
+
+        if not providers and not local_path:
+            self.console.print("[red]✗ At least one source must be configured[/red]")
+            return None
+
+        return VisualsConfig(mode="hybrid", providers=providers, local_path=local_path)
+
+    def _show_summary(self, config: VisualsConfig) -> None:
+        """Display configuration summary.
+
+        Args:
+            config: Visuals configuration.
+        """
+        self.console.print()
+        providers_str = ", ".join(config.providers) if config.providers else "None"
+        self.console.print(
+            Panel(
+                f"[bold]Mode:[/bold] {config.mode}\n"
+                f"[bold]Providers:[/bold] {providers_str}\n"
+                f"[bold]Local Path:[/bold] {config.local_path or 'N/A'}",
+                title="[green]Visuals Configuration Summary[/green]",
             )
         )
