@@ -1754,7 +1754,18 @@ auto-video --version
 - ✓ show_summary() pour TTS et Images configs
 - ✓ Import tempfile pour test fixtures
 
-**Prochaine étape**: Étape 1.8 - Créer le wizard Prompts (ui/setup.py étendu)
+✓ Étape 1.8: Setup Wizard Prompts (complété)
+- ✓ PromptsSetupWizard class pour configuration prompts
+- ✓ PromptsSetupResult dataclass pour résultat wizard
+- ✓ Menu pour afficher/éditer chaque prompt (general, targeted, image)
+- ✓ Support ouverture éditeur externe via $EDITOR
+- ✓ Support réinitialisation prompts par défaut
+- ✓ Support réinitialisation tous les prompts
+- ✓ show_summary() pour résumé configuration
+- ✓ 16 tests, tous passants
+- ✓ Résolution correcte du chemin prompts/
+
+**Prochaine étape**: Étape 1.9 - Créer le wizard YouTube (ui/setup.py étendu)
 
 ---
 
