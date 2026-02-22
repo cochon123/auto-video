@@ -1,5 +1,6 @@
 """Setup wizard UI for LLM configuration."""
 
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -8,7 +9,45 @@ from rich.panel import Panel
 from rich.prompt import Confirm, Prompt
 from rich.table import Table
 
-from auto_video.config.schema import LLMProviderConfig, StorageConfig, VisualsConfig
+from auto_video.config.schema import (
+    ImageGenConfig,
+    LLMProviderConfig,
+    StorageConfig,
+    TTSConfig,
+    VisualsConfig,
+)
+
+
+def _get_api_key(console: Console, provider: str) -> str | None:
+    """Get API key from user.
+
+    Args:
+        console: Rich console for user interaction.
+        provider: Provider name.
+
+    Returns:
+        API key or None if cancelled.
+    """
+    if not Confirm.ask(
+        f"Do you want to enter an API key for {provider} now?",
+        default=True,
+        console=console,
+    ):
+        return None
+
+    console.print("[yellow]API key will be stored in plain text in config file.[/yellow]")
+
+    key = Prompt.ask(
+        f"Enter {provider} API key",
+        password=True,
+        console=console,
+    )
+
+    if not key:
+        console.print("[red]API key cannot be empty[/red]")
+        return None
+
+    return key
 
 
 @dataclass
@@ -128,7 +167,7 @@ class LLMSetupWizard:
         if not model:
             return None
 
-        api_key = self._get_api_key(provider)
+        api_key = _get_api_key(self.console, provider)
         if not api_key:
             return None
 
@@ -534,6 +573,16 @@ class VisualsSetupResult:
     message: str
 
 
+@dataclass
+class TTSImageSetupResult:
+    """Result of TTS and Images setup wizard."""
+
+    tts_config: TTSConfig | None
+    image_config: ImageGenConfig | None
+    success: bool
+    message: str
+
+
 class VisualsSetupWizard:
     """Wizard for setting up visuals configuration."""
 
@@ -763,5 +812,373 @@ class VisualsSetupWizard:
                 f"[bold]Providers:[/bold] {providers_str}\n"
                 f"[bold]Local Path:[/bold] {config.local_path or 'N/A'}",
                 title="[green]Visuals Configuration Summary[/green]",
+            )
+        )
+
+
+class TTSImageSetupWizard:
+    """Wizard for setting up TTS and Image generation."""
+
+    def __init__(self, console: Console | None = None) -> None:
+        """Initialize wizard.
+
+        Args:
+            console: Rich console instance. If None, creates a new one.
+        """
+        self.console = console or Console()
+
+    def run(self) -> TTSImageSetupResult:
+        """Run TTS and Image generation setup wizard.
+
+        Returns:
+            Setup result with configurations.
+        """
+        self._show_welcome()
+
+        tts_config = self._setup_tts()
+        if not tts_config:
+            return TTSImageSetupResult(
+                tts_config=None,
+                image_config=None,
+                success=False,
+                message="Setup cancelled",
+            )
+
+        image_config = self._setup_image_gen()
+
+        if image_config:
+            self._test_image_generation(image_config)
+
+        self._show_summary(tts_config, image_config)
+        return TTSImageSetupResult(
+            tts_config=tts_config,
+            image_config=image_config,
+            success=True,
+            message="TTS and Images configured successfully",
+        )
+
+    def _show_welcome(self) -> None:
+        """Display welcome screen."""
+        self.console.print(
+            Panel.fit(
+                "[bold blue]TTS and Image Generation Wizard[/bold blue]\n\n"
+                "This wizard will help you configure Text-to-Speech "
+                "and AI image generation for your videos.",
+                title="Auto-Video Setup",
+            )
+        )
+        self.console.print()
+
+    def _setup_tts(self) -> TTSConfig | None:
+        """Setup TTS configuration.
+
+        Returns:
+            TTS configuration or None if cancelled.
+        """
+        self.console.print("[bold]Configure Text-to-Speech (TTS)[/bold]")
+        self.console.print()
+
+        mode = self._select_tts_mode()
+
+        if mode == "local":
+            return self._setup_tts_local()
+        elif mode == "api":
+            return self._setup_tts_api()
+        else:
+            return self._setup_tts_hybrid()
+
+    def _select_tts_mode(self) -> str:
+        """Select TTS mode.
+
+        Returns:
+            Selected mode.
+        """
+        self.console.print("[bold]Select TTS Mode:[/bold]")
+        self.console.print()
+
+        choices = ["1. Local (Kokoro)", "2. API", "3. Hybrid"]
+
+        for choice in choices:
+            self.console.print(f"  {choice}")
+
+        while True:
+            self.console.print()
+            selection = Prompt.ask(
+                "Select mode",
+                choices=["1", "2", "3"],
+                default="1",
+            )
+
+            if selection == "1":
+                return "local"
+            elif selection == "2":
+                return "api"
+            else:
+                return "hybrid"
+
+    def _setup_tts_local(self) -> TTSConfig | None:
+        """Setup local TTS.
+
+        Returns:
+            TTS configuration or None if cancelled.
+        """
+        self.console.print("[yellow]Local mode uses Kokoro-82M for TTS.[/yellow]")
+        self.console.print("[dim]Model will be downloaded on first use.[/dim]")
+        self.console.print()
+
+        voice = self._select_tts_voice()
+
+        return TTSConfig(mode="local", voice=voice)
+
+    def _setup_tts_api(self) -> TTSConfig | None:
+        """Setup API TTS.
+
+        Returns:
+            TTS configuration or None if cancelled.
+        """
+        provider = self._select_tts_api_provider()
+        if not provider:
+            return None
+
+        api_key = _get_api_key(self.console, provider)
+        if not api_key:
+            return None
+
+        voice = self._select_tts_voice()
+
+        return TTSConfig(mode="api", provider=provider, voice=voice, api_key=api_key)
+
+    def _setup_tts_hybrid(self) -> TTSConfig | None:
+        """Setup hybrid TTS.
+
+        Returns:
+            TTS configuration or None if cancelled.
+        """
+        self.console.print(
+            "[yellow]Hybrid mode: Uses API by default, falls back to local Kokoro.[/yellow]"
+        )
+        self.console.print()
+
+        api_config = self._setup_tts_api()
+        if not api_config:
+            return None
+
+        return TTSConfig(
+            mode="hybrid",
+            provider=api_config.provider,
+            voice=api_config.voice,
+            api_key=api_config.api_key,
+        )
+
+    def _select_tts_api_provider(self) -> str | None:
+        """Select TTS API provider.
+
+        Returns:
+            Provider name or None if cancelled.
+        """
+        self.console.print("[bold]Select TTS API Provider:[/bold]")
+        self.console.print()
+
+        providers = [("elevenlabs", "ElevenLabs"), ("openai", "OpenAI TTS")]
+
+        table = Table(title="Available TTS Providers")
+        table.add_column("ID", style="cyan")
+        table.add_column("Provider", style="green")
+
+        for idx, (name, desc) in enumerate(providers, 1):
+            table.add_row(str(idx), desc)
+
+        self.console.print(table)
+
+        choices = [str(i) for i in range(1, len(providers) + 1)]
+        selection = Prompt.ask("Select provider", choices=choices, default="1")
+
+        idx = int(selection) - 1
+        return providers[idx][0]
+
+    def _select_tts_voice(self) -> str:
+        """Select TTS voice.
+
+        Returns:
+            Voice identifier.
+        """
+        self.console.print("[bold]Select Voice:[/bold]")
+        self.console.print("[dim]For Kokoro, use voice codes like 'a_f' or 'b_f'.[/dim]")
+        self.console.print()
+
+        voice = Prompt.ask("Enter voice identifier", default="default")
+
+        return voice
+
+    def _setup_image_gen(self) -> ImageGenConfig | None:
+        """Setup image generation configuration.
+
+        Returns:
+            Image generation configuration or None if cancelled.
+        """
+        if not Confirm.ask(
+            "Enable AI image generation?",
+            default=False,
+        ):
+            return None
+
+        mode = self._select_image_mode()
+
+        if mode == "local":
+            return self._setup_image_local()
+        else:
+            return self._setup_image_api()
+
+    def _select_image_mode(self) -> str:
+        """Select image generation mode.
+
+        Returns:
+            Selected mode.
+        """
+        self.console.print("[bold]Select Image Generation Mode:[/bold]")
+        self.console.print()
+
+        choices = ["1. Local (Z-Image)", "2. API"]
+
+        for choice in choices:
+            self.console.print(f"  {choice}")
+
+        selection = Prompt.ask(
+            "Select mode",
+            choices=["1", "2"],
+            default="1",
+        )
+
+        return "local" if selection == "1" else "api"
+
+    def _setup_image_local(self) -> ImageGenConfig | None:
+        """Setup local image generation.
+
+        Returns:
+            Image generation configuration or None if cancelled.
+        """
+        self.console.print("[yellow]Local mode uses Z-Image for AI generation.[/yellow]")
+        self.console.print("[dim]Model will be downloaded on first use.[/dim]")
+        self.console.print()
+
+        return ImageGenConfig(
+            enabled=True,
+            mode="local",
+            model="Z-Image/Z-Image-Turbo",
+            steps=6,
+        )
+
+    def _setup_image_api(self) -> ImageGenConfig | None:
+        """Setup API image generation.
+
+        Returns:
+            Image generation configuration or None if cancelled.
+        """
+        provider = self._select_image_api_provider()
+        if not provider:
+            return None
+
+        api_key = _get_api_key(self.console, provider)
+
+        return ImageGenConfig(
+            enabled=True,
+            mode="api",
+            provider=provider,
+            api_key=api_key,
+        )
+
+    def _select_image_api_provider(self) -> str | None:
+        """Select image generation API provider.
+
+        Returns:
+            Provider name or None if cancelled.
+        """
+        self.console.print("[bold]Select Image Generation API Provider:[/bold]")
+        self.console.print()
+
+        providers = [
+            ("openai", "OpenAI DALL-E"),
+            ("stability", "Stability AI"),
+        ]
+
+        table = Table(title="Available Providers")
+        table.add_column("ID", style="cyan")
+        table.add_column("Provider", style="green")
+
+        for idx, (name, desc) in enumerate(providers, 1):
+            table.add_row(str(idx), desc)
+
+        self.console.print(table)
+
+        choices = [str(i) for i in range(1, len(providers) + 1)]
+        selection = Prompt.ask("Select provider", choices=choices, default="1")
+
+        idx = int(selection) - 1
+        return providers[idx][0]
+
+    def _test_image_generation(self, config: ImageGenConfig) -> None:
+        """Test image generation.
+
+        Args:
+            config: Image generation configuration.
+        """
+        if not Confirm.ask(
+            "Do you want to test image generation now?",
+            default=False,
+        ):
+            return
+
+        self.console.print()
+        self.console.print("[cyan]Testing image generation...[/cyan]")
+
+        try:
+            from auto_video.core.thumbnail import ThumbnailGenerator
+
+            generator = ThumbnailGenerator(config)
+
+            with tempfile.TemporaryDirectory() as tmpdir:
+                output_path = Path(tmpdir) / "test_image.png"
+                generator.generate(
+                    "A beautiful sunset over mountains",
+                    output_path,
+                    size=(512, 512),
+                )
+
+                if output_path.exists():
+                    self.console.print("[green]✓ Test successful![/green]")
+                    self.console.print(f"[dim]Image saved to: {output_path}[/dim]")
+        except ImportError:
+            self.console.print(
+                "[yellow]Image generation module not available - skipping test[/yellow]"
+            )
+        except Exception as e:
+            self.console.print(f"[red]✗ Test failed:[/red] {e}")
+
+    def _show_summary(self, tts_config: TTSConfig, image_config: ImageGenConfig | None) -> None:
+        """Display configuration summary.
+
+        Args:
+            tts_config: TTS configuration.
+            image_config: Image generation configuration.
+        """
+        self.console.print()
+        summary_parts = []
+
+        summary_parts.append(f"[bold]TTS Mode:[/bold] {tts_config.mode}")
+        summary_parts.append(f"[bold]TTS Voice:[/bold] {tts_config.voice}")
+
+        if tts_config.provider:
+            summary_parts.append(f"[bold]TTS Provider:[/bold] {tts_config.provider}")
+
+        if image_config and image_config.enabled:
+            summary_parts.append(f"[bold]Images:[/bold] {image_config.mode}")
+
+            if image_config.provider:
+                summary_parts.append(f"[bold]Image Provider:[/bold] {image_config.provider}")
+
+        self.console.print(
+            Panel(
+                "\n".join(summary_parts),
+                title="[green]TTS and Images Configuration Summary[/green]",
             )
         )
