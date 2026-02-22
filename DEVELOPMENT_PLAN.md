@@ -1159,5 +1159,27 @@ __pycache__/
          ↓
       3.1 → 3.2 → 3.3 → 3.4 → 3.5
          ↓
-      4.1 → 4.2 → 4.3 → 4.4 → 4.5
+       4.1 → 4.2 → 4.3 → 4.4 → 4.5
 ```
+
+---
+
+## Progression Actuelle
+
+**Phase 0: Initialisation du Projet** - **En cours (70% complet)**
+
+✓ Étape 0.1: Documentation et structure (complété)
+- ✓ Documentation créée (README, ARCHITECTURE, PIPELINE, MODELS, API, SETUP, DEVELOPMENT)
+- ✓ DEVELOPMENT_PLAN.md créé (26 étapes en 5 phases)
+- ✓ Repository Git initialisé (.gitignore, commit initial)
+- ✗ Structure de dossiers de code Python (à faire)
+
+○ Étape 0.2: Configuration Python (à démarrer)
+- ⏸️ pyproject.toml à créer
+- ⏸️ Dépendances à définir
+
+**Prochaine étape**: Créer l'arborescence de dossiers du projet Python et le fichier pyproject.toml (Étape 0.1 complète)
+
+---
+
+**Dernière mise à jour**: 21 février 2026

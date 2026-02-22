@@ -1,0 +1,60 @@
+[project]
+name = "auto-video"
+version = "0.1.0"
+description = "Automated video creation with AI"
+requires-python = ">=3.10"
+dependencies = [
+    "rich>=13.0.0",
+    "pydantic>=2.0.0",
+    "pyyaml>=6.0",
+    "tenacity>=8.0.0",
+    "httpx>=0.25.0",
+    "openai>=1.0.0",
+    "tomli>=2.0.0;python_version<'3.11'",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "ruff>=0.1.0",
+    "mypy>=1.0.0",
+]
+llm-local = [
+    "ollama>=0.1.0",
+]
+tts-local = [
+    "torch>=2.0.0",
+    "scipy>=1.10.0",
+]
+stt-local = [
+    "openai-whisper>=20230314",
+]
+image-local = [
+    "diffusers>=0.25.0",
+    "transformers>=4.35.0",
+    "accelerate>=0.25.0",
+]
+youtube = [
+    "google-auth>=2.0.0",
+    "google-auth-oauthlib>=1.0.0",
+    "google-api-python-client>=2.0.0",
+]
+
+[project.scripts]
+auto-video = "auto_video.__main__:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.ruff]
+line-length = 100
+select = ["E", "F", "I", "N", "W"]
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
