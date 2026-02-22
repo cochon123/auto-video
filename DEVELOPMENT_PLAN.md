@@ -1733,7 +1733,17 @@ auto-video --version
 - ✓ Chemins par défaut: ~/Videos/auto-videos et ~/.cache/auto-video/temp
 - ✓ Expansion ~ (home directory) dans les chemins
 
-**Prochaine étape**: Étape 1.6 - Créer le wizard Visuels (ui/setup.py étendu)
+✓ Étape 1.6: Setup Wizard Visuels (complété)
+- ✓ VisualsSetupWizard class pour configuration visuels
+- ✓ Sélection mode (Stock API/Local/Generated/Hybrid)
+- ✓ Configuration providers stock (Pexels, Pixabay) avec clés API
+- ✓ Configuration assets locaux avec validation chemin
+- ✓ Mode hybride combinant plusieurs sources
+- ✓ show_summary() pour affichage résumé
+- ✓ 21 tests, tous passants
+- ✓ Filtrage providers pour exclure None
+
+**Prochaine étape**: Étape 1.7 - Créer le wizard TTS + Images (ui/setup.py étendu)
 
 ---
 
