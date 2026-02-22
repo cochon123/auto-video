@@ -1,13 +1,14 @@
 """Setup wizard UI for LLM configuration."""
 
 from dataclasses import dataclass
+from pathlib import Path
 
 from rich.console import Console
 from rich.panel import Panel
 from rich.prompt import Confirm, Prompt
 from rich.table import Table
 
-from auto_video.config.schema import LLMProviderConfig
+from auto_video.config.schema import LLMProviderConfig, StorageConfig
 
 
 @dataclass
@@ -15,6 +16,15 @@ class LLMSetupResult:
     """Result of LLM setup wizard."""
 
     config: LLMProviderConfig | None
+    success: bool
+    message: str
+
+
+@dataclass
+class StorageSetupResult:
+    """Result of storage setup wizard."""
+
+    config: StorageConfig | None
     success: bool
     message: str
 
@@ -334,3 +344,182 @@ class LLMSetupWizard:
             self.console.print(f"[red]✗ Connection failed:[/red] {e}")
 
         return Confirm.ask("Continue anyway?", default=False)
+
+
+class StorageSetupWizard:
+    """Wizard for setting up storage configuration."""
+
+    def __init__(self, console: Console | None = None) -> None:
+        """Initialize wizard.
+
+        Args:
+            console: Rich console instance. If None, creates a new one.
+        """
+        self.console = console or Console()
+
+    def run(self) -> StorageSetupResult:
+        """Run storage setup wizard.
+
+        Returns:
+            Setup result with configuration.
+        """
+        self._show_welcome()
+
+        save_videos = self._ask_save_videos()
+
+        if save_videos:
+            videos_path = self._ask_videos_path()
+        else:
+            videos_path = None
+
+        keep_temp = self._ask_keep_temp()
+        temp_path = self._ask_temp_path()
+
+        config = self._validate_and_create_config(videos_path, temp_path, keep_temp)
+
+        if not config:
+            return StorageSetupResult(config=None, success=False, message="Setup cancelled")
+
+        self._show_summary(config)
+        return StorageSetupResult(
+            config=config,
+            success=True,
+            message="Storage configured successfully",
+        )
+
+    def _show_welcome(self) -> None:
+        """Display welcome screen."""
+        self.console.print(
+            Panel.fit(
+                "[bold blue]Storage Configuration Wizard[/bold blue]\n\n"
+                "This wizard will help you configure where to store your "
+                "generated videos and temporary files.",
+                title="Auto-Video Setup",
+            )
+        )
+        self.console.print()
+
+    def _ask_save_videos(self) -> bool:
+        """Ask whether to save generated videos.
+
+        Returns:
+            True if user wants to save videos, False otherwise.
+        """
+        return Confirm.ask(
+            "Do you want to save generated videos to disk?",
+            default=True,
+        )
+
+    def _ask_videos_path(self) -> Path:
+        """Ask for videos storage path.
+
+        Returns:
+            Path for video storage.
+        """
+        default = Path.home() / "Videos" / "auto-videos"
+        self.console.print(f"[dim]Default: {default}[/dim]")
+
+        path_str = Prompt.ask(
+            "Enter path for storing videos",
+            default=str(default),
+        )
+
+        path = Path(path_str).expanduser()
+
+        self._create_directory_if_needed(path, "Videos")
+
+        return path
+
+    def _ask_keep_temp(self) -> bool:
+        """Ask whether to keep temporary files.
+
+        Returns:
+            True if user wants to keep temp files, False otherwise.
+        """
+        self.console.print(
+            "[dim]Temporary files include audio, scripts, and intermediate video files.[/dim]"
+        )
+        return Confirm.ask(
+            "Do you want to keep temporary files after generation?",
+            default=False,
+        )
+
+    def _ask_temp_path(self) -> Path:
+        """Ask for temporary files path.
+
+        Returns:
+            Path for temporary files.
+        """
+        default = Path.home() / ".cache" / "auto-video" / "temp"
+        self.console.print(f"[dim]Default: {default}[/dim]")
+
+        path_str = Prompt.ask(
+            "Enter path for temporary files",
+            default=str(default),
+        )
+
+        path = Path(path_str).expanduser()
+
+        self._create_directory_if_needed(path, "Temporary files")
+
+        return path
+
+    def _create_directory_if_needed(self, path: Path, description: str) -> None:
+        """Create directory if it doesn't exist.
+
+        Args:
+            path: Path to create.
+            description: Description of the directory (for messages).
+        """
+        if path.exists():
+            if path.is_dir():
+                self.console.print(f"[green]✓ {description} directory already exists[/green]")
+                return
+
+            self.console.print(f"[red]✗ Path exists but is not a directory: {path}[/red]")
+            raise ValueError(f"Path is not a directory: {path}")
+
+        try:
+            path.mkdir(parents=True, exist_ok=True)
+            self.console.print(f"[green]✓ Created {description} directory[/green]")
+        except Exception as e:
+            self.console.print(f"[red]✗ Failed to create directory: {e}[/red]")
+            raise
+
+    def _validate_and_create_config(
+        self, videos_path: Path | None, temp_path: Path, keep_temp: bool
+    ) -> StorageConfig | None:
+        """Validate and create storage configuration.
+
+        Args:
+            videos_path: Path for videos storage (optional).
+            temp_path: Path for temporary files.
+            keep_temp: Whether to keep temporary files.
+
+        Returns:
+            Storage configuration or None if validation fails.
+        """
+        if videos_path is None:
+            videos_path = Path.home() / "Videos" / "auto-videos"
+
+        try:
+            return StorageConfig(videos_path=videos_path, temp_path=temp_path, keep_temp=keep_temp)
+        except Exception as e:
+            self.console.print(f"[red]✗ Configuration error: {e}[/red]")
+            return None
+
+    def _show_summary(self, config: StorageConfig) -> None:
+        """Display configuration summary.
+
+        Args:
+            config: Storage configuration.
+        """
+        self.console.print()
+        self.console.print(
+            Panel(
+                f"[bold]Videos Path:[/bold] {config.videos_path}\n"
+                f"[bold]Temp Path:[/bold] {config.temp_path}\n"
+                f"[bold]Keep Temp Files:[/bold] {config.keep_temp}",
+                title="[green]Storage Configuration Summary[/green]",
+            )
+        )
