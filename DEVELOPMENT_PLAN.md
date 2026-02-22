@@ -1708,7 +1708,19 @@ auto-video --version
 - ✓ get_file_size() et copy_to_output()
 - ✓ 17 tests, tous passants
 
-**Prochaine étape**: Étape 1.4 - Créer le wizard LLM (ui/setup.py)
+✓ Étape 1.4: Setup Wizard LLM (complété)
+- ✓ LLMSetupWizard class pour configuration interactive
+- ✓ Sélection mode (API/Local/Hybride)
+- ✓ Sélection provider avec affichage table
+- ✓ Sélection modèle pour chaque provider
+- ✓ Saisie clé API avec masquage
+- ✓ Réglage température avec validation
+- ✓ Test de connexion avec gestion ImportError
+- ✓ Affichage résumé configuration
+- ✓ 3 workflows: API, Local, Hybride
+- ✓ 20 tests, tous passants
+
+**Prochaine étape**: Étape 1.5 - Créer le wizard Stockage (ui/setup.py étendu)
 
 ---
 
