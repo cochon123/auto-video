@@ -1682,7 +1682,7 @@ auto-video --version
 - ✓ Configuration ruff, mypy, pytest ajoutée
 - ✓ Script CLI 'auto-video' configuré
 
-**Phase 1: Configuration et Setup** - **En cours (20% complet)**
+**Phase 1: Configuration et Setup** - **En cours (30% complet)**
 
 ✓ Étape 1.1: Schema de Configuration (complété)
 - ✓ LLMProviderConfig, TTSConfig, ImageGenConfig
@@ -1698,7 +1698,17 @@ auto-video --version
 - ✓ get_default_config_path() et create_default_config()
 - ✓ 12 tests, tous passants
 
-**Prochaine étape**: Étape 1.3 - Créer le gestionnaire de workspace (utils/workspace.py)
+✓ Étape 1.3: Workspace Manager (complété)
+- ✓ Workspace class pour gestion fichiers vidéo
+- ✓ Génération automatique ID vidéo (timestamp + UUID)
+- ✓ Propriétés pour tous les artefacts (script, audio, vidéo, etc.)
+- ✓ create() pour création structure dossiers
+- ✓ cleanup() avec option keep_artifacts
+- ✓ list_artifacts() pour tracking fichiers
+- ✓ get_file_size() et copy_to_output()
+- ✓ 17 tests, tous passants
+
+**Prochaine étape**: Étape 1.4 - Créer le wizard LLM (ui/setup.py)
 
 ---
 
