@@ -364,7 +364,7 @@ class LLMSetupWizard:
         self.console.print("[cyan]Testing connection...[/cyan]")
 
         try:
-            from auto_video.core.llm import LLM
+            from auto_video.core.llm import LLM  # type: ignore
 
             llm = LLM(config)
             test_prompt = "Say 'test'"
@@ -1079,6 +1079,8 @@ class TTSImageSetupWizard:
             return None
 
         api_key = _get_api_key(self.console, provider)
+        if not api_key:
+            return None
 
         return ImageGenConfig(
             enabled=True,
@@ -1132,7 +1134,7 @@ class TTSImageSetupWizard:
         self.console.print("[cyan]Testing image generation...[/cyan]")
 
         try:
-            from auto_video.core.thumbnail import ThumbnailGenerator
+            from auto_video.core.thumbnail import ThumbnailGenerator  # type: ignore
 
             generator = ThumbnailGenerator(config)
 
@@ -1180,5 +1182,221 @@ class TTSImageSetupWizard:
             Panel(
                 "\n".join(summary_parts),
                 title="[green]TTS and Images Configuration Summary[/green]",
+            )
+        )
+
+
+@dataclass
+class PromptsSetupResult:
+    """Result of prompts setup wizard."""
+
+    general_prompt: str
+    targeted_prompt: str
+    image_prompt: str
+    success: bool
+    message: str
+
+
+class PromptsSetupWizard:
+    """Wizard for configuring prompts."""
+
+    def __init__(self, console: Console | None = None) -> None:
+        """Initialize wizard.
+
+        Args:
+            console: Rich console instance. If None, creates a new one.
+        """
+        self.console = console or Console()
+        self.prompts_dir = Path(__file__).parent.parent.parent.parent / "prompts"
+
+    def run(self) -> PromptsSetupResult:
+        """Run prompts setup wizard.
+
+        Returns:
+            Setup result with prompt configurations.
+        """
+        self._show_welcome()
+
+        while True:
+            choice = self._show_menu()
+
+            if choice == "1":
+                self._edit_prompt("general")
+            elif choice == "2":
+                self._edit_prompt("targeted")
+            elif choice == "3":
+                self._edit_prompt("image")
+            elif choice == "4":
+                self._reset_all_prompts()
+            elif choice == "5":
+                break
+
+        general_prompt = self._load_prompt("general")
+        targeted_prompt = self._load_prompt("targeted")
+        image_prompt = self._load_prompt("image")
+
+        self._show_summary(general_prompt, targeted_prompt, image_prompt)
+        return PromptsSetupResult(
+            general_prompt=general_prompt,
+            targeted_prompt=targeted_prompt,
+            image_prompt=image_prompt,
+            success=True,
+            message="Prompts configured successfully",
+        )
+
+    def _show_welcome(self) -> None:
+        """Display welcome screen."""
+        self.console.print(
+            Panel.fit(
+                "[bold blue]Prompts Configuration Wizard[/bold blue]\n\n"
+                "This wizard will help you view and customize the prompts "
+                "used for script generation and image creation.",
+                title="Auto-Video Setup",
+            )
+        )
+        self.console.print()
+
+    def _show_menu(self) -> str:
+        """Display main menu.
+
+        Returns:
+            User's menu choice.
+        """
+        self.console.print("[bold]Prompts Configuration:[/bold]")
+        self.console.print()
+
+        choices = [
+            "1. View/Edit General Prompt",
+            "2. View/Edit Targeted Prompt",
+            "3. View/Edit Image Generation Prompt",
+            "4. Reset All to Defaults",
+            "5. Finish",
+        ]
+
+        for choice in choices:
+            self.console.print(f"  {choice}")
+
+        self.console.print()
+        selection = Prompt.ask(
+            "Select option",
+            choices=["1", "2", "3", "4", "5"],
+            default="5",
+        )
+
+        return selection
+
+    def _edit_prompt(self, prompt_name: str) -> None:
+        """Edit a specific prompt.
+
+        Args:
+            prompt_name: Name of the prompt (general, targeted, or image).
+        """
+        prompt_file = self.prompts_dir / f"{prompt_name}.txt"
+        current_prompt = self._load_prompt(prompt_name)
+
+        self.console.print()
+        self.console.print(
+            Panel(
+                f"[bold]Current {prompt_name.title()} Prompt:[/bold]\n\n{current_prompt}",
+                title=f"{prompt_name.title()} Prompt",
+            )
+        )
+        self.console.print()
+
+        action = Prompt.ask(
+            "Choose action",
+            choices=["view", "edit", "reset", "back"],
+            default="view",
+        )
+
+        if action == "edit":
+            self._open_editor(prompt_file)
+            self._load_prompt(prompt_name)
+            self.console.print(f"[green]✓ {prompt_name.title()} prompt updated[/green]")
+        elif action == "reset":
+            self._reset_prompt(prompt_name)
+            self.console.print(f"[green]✓ {prompt_name.title()} prompt reset to default[/green]")
+
+    def _load_prompt(self, prompt_name: str) -> str:
+        """Load a prompt from file.
+
+        Args:
+            prompt_name: Name of the prompt.
+
+        Returns:
+            Prompt content as string.
+        """
+        prompt_file = self.prompts_dir / f"{prompt_name}.txt"
+
+        if not prompt_file.exists():
+            return f"Default {prompt_name} prompt"
+
+        return prompt_file.read_text().strip()
+
+    def _open_editor(self, prompt_file: Path) -> None:
+        """Open a file in the system's default editor.
+
+        Args:
+            prompt_file: Path to the file to edit.
+        """
+        import os
+        import subprocess
+
+        editor = os.environ.get("EDITOR", "nano")
+
+        self.console.print(f"[dim]Opening {prompt_file} with {editor}...[/dim]")
+        self.console.print()
+
+        try:
+            subprocess.call([editor, str(prompt_file)])
+        except Exception as e:
+            self.console.print(f"[red]✗ Failed to open editor: {e}[/red]")
+            self.console.print("[yellow]You can manually edit the file at:[/yellow]")
+            self.console.print(f"  {prompt_file}")
+
+    def _reset_prompt(self, prompt_name: str) -> None:
+        """Reset a prompt to its default value.
+
+        Args:
+            prompt_name: Name of the prompt.
+        """
+        default_prompts = {
+            "general": "# General prompt for video script generation",
+            "targeted": "# Targeted prompt for specific video topics",
+            "image": "# Prompt for image generation",
+        }
+
+        prompt_file = self.prompts_dir / f"{prompt_name}.txt"
+        prompt_file.write_text(default_prompts[prompt_name])
+
+    def _reset_all_prompts(self) -> None:
+        """Reset all prompts to their default values."""
+        if not Confirm.ask(
+            "Are you sure you want to reset all prompts to defaults?",
+            default=False,
+        ):
+            return
+
+        self._reset_prompt("general")
+        self._reset_prompt("targeted")
+        self._reset_prompt("image")
+
+        self.console.print("[green]✓ All prompts reset to defaults[/green]")
+
+    def _show_summary(self, general: str, targeted: str, image: str) -> None:
+        """Display configuration summary.
+
+        Args:
+            general: General prompt content.
+            targeted: Targeted prompt content.
+            image: Image prompt content.
+        """
+        self.console.print()
+        self.console.print(
+            Panel(
+                f"[bold]General Prompt:[/bold] {len(general)} chars\n"
+                f"[bold]Targeted Prompt:[/bold] {len(targeted)} chars\n"
+                f"[bold]Image Prompt:[/bold] {len(image)} chars",
+                title="[green]Prompts Configuration Summary[/green]",
             )
         )
