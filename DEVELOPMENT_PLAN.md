@@ -1720,7 +1720,20 @@ auto-video --version
 - ✓ 3 workflows: API, Local, Hybride
 - ✓ 20 tests, tous passants
 
-**Prochaine étape**: Étape 1.5 - Créer le wizard Stockage (ui/setup.py étendu)
+✓ Étape 1.5: Setup Wizard Stockage (complété)
+- ✓ StorageSetupWizard class pour configuration stockage
+- ✓ ask_save_videos() pour activer/désactiver stockage
+- ✓ ask_videos_path() pour définir dossier sortie
+- ✓ ask_keep_temp() pour conservation fichiers temp
+- ✓ ask_temp_path() pour définir dossier temp
+- ✓ create_directory_if_needed() avec validation
+- ✓ validate_and_create_config() pour validation config
+- ✓ show_summary() pour affichage résumé
+- ✓ 18 tests, tous passants
+- ✓ Chemins par défaut: ~/Videos/auto-videos et ~/.cache/auto-video/temp
+- ✓ Expansion ~ (home directory) dans les chemins
+
+**Prochaine étape**: Étape 1.6 - Créer le wizard Visuels (ui/setup.py étendu)
 
 ---
 
