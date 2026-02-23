@@ -606,7 +606,9 @@ class VideoPipeline:
                 composer.add_audio(
                     workspace.video_raw_path, workspace.audio_path, workspace.final_path
                 )
-                composer.apply_format(workspace.final_path, workspace.final_path, state.format)
+                composer.apply_format_with_temp(
+                    workspace.final_path, workspace.final_path, state.format
+                )
 
                 completed_steps.append(PipelineStep.MONTAGE)
                 state.completed_steps.append(4)
@@ -1644,7 +1646,9 @@ class VideoPipeline:
                 composer.add_audio(
                     workspace.video_raw_path, workspace.audio_path, workspace.final_path
                 )
-                composer.apply_format(workspace.final_path, workspace.final_path, state.format)
+                composer.apply_format_with_temp(
+                    workspace.final_path, workspace.final_path, state.format
+                )
 
                 completed_steps.append(PipelineStep.MONTAGE)
                 state.completed_steps.append(4)

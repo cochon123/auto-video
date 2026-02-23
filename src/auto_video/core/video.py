@@ -235,25 +235,97 @@ class VideoComposer:
                 ["-preset", self.preset, "-crf", str(self.quality), "-threads", "0"]
             )
 
+    def _normalize_clip(self, input_path: Path, output_path: Path) -> None:
+        """Normalize a video clip to standard properties.
+
+        Standard properties:
+        - Codec: h264
+        - Resolution: 640x360 (landscape)
+        - Frame rate: 30 fps
+        - Pixel format: yuv420p
+        - No audio track
+
+        Args:
+            input_path: Path to input video file
+            output_path: Path for normalized output video
+        """
+        subprocess.run(
+            [
+                self.ffmpeg_path,
+                "-y",
+                "-i",
+                str(input_path),
+                "-c:v",
+                "libx264",
+                "-preset",
+                "fast",
+                "-crf",
+                "23",
+                "-vf",
+                "scale=640:360:force_original_aspect_ratio=decrease,pad=640:360:(ow-iw)/2:(oh-ih)/2,fps=30",
+                "-pix_fmt",
+                "yuv420p",
+                "-r",
+                "30",
+                "-an",
+                str(output_path),
+            ],
+            capture_output=True,
+            check=True,
+            timeout=120,
+        )
+
+    def _extract_video_stream(self, input_path: Path, output_path: Path) -> None:
+        """Extract only the video stream from a file.
+
+        Removes any audio tracks and ensures clean video-only file.
+
+        Args:
+            input_path: Path to input video file
+            output_path: Path for video-only output
+        """
+        subprocess.run(
+            [
+                self.ffmpeg_path,
+                "-y",
+                "-i",
+                str(input_path),
+                "-c:v",
+                "copy",
+                "-an",
+                str(output_path),
+            ],
+            capture_output=True,
+            check=True,
+            timeout=60,
+        )
+
     def concatenate_clips(self, clips: list[Path], output: Path, target_duration: float) -> None:
         output.parent.mkdir(parents=True, exist_ok=True)
         temp_dir = output.parent / "temp_concat"
         temp_dir.mkdir(exist_ok=True)
 
         total_duration = 0.0
-        adjusted_clips: list[Path] = []
+        normalized_clips: list[Path] = []
 
         for clip_path in clips:
             clip_duration = self.get_duration(clip_path)
             remaining = target_duration - total_duration
 
+            if remaining <= 0:
+                break
+
             if clip_duration <= remaining:
-                adjusted_clips.append(clip_path)
+                normalized_clip = temp_dir / f"normalized_{clip_path.stem}.mp4"
+                self._normalize_clip(clip_path, normalized_clip)
+                normalized_clips.append(normalized_clip)
                 total_duration += clip_duration
             elif remaining > 0:
-                adjusted_clip = temp_dir / f"adjusted_{clip_path.stem}.mp4"
-                self._trim_clip(clip_path, adjusted_clip, remaining)
-                adjusted_clips.append(adjusted_clip)
+                temp_clip = temp_dir / f"temp_{clip_path.stem}.mp4"
+                self._trim_clip(clip_path, temp_clip, remaining)
+                normalized_clip = temp_dir / f"normalized_{clip_path.stem}.mp4"
+                self._normalize_clip(temp_clip, normalized_clip)
+                normalized_clips.append(normalized_clip)
                 total_duration += remaining
 
             if total_duration >= target_duration:
@@ -261,7 +333,7 @@ class VideoComposer:
 
         manifest_path = temp_dir / "concat_manifest.txt"
         with manifest_path.open("w") as f:
-            for clip in adjusted_clips:
+            for clip in normalized_clips:
                 f.write(f"file '{clip.absolute()}'\n")
 
         subprocess.run(
@@ -275,9 +347,15 @@ class VideoComposer:
                 "-i",
                 str(manifest_path),
                 "-c:v",
-                "copy",
-                "-c:a",
-                "copy",
+                "libx264",
+                "-preset",
+                "fast",
+                "-crf",
+                "23",
+                "-pix_fmt",
+                "yuv420p",
+                "-r",
+                "30",
                 str(output),
             ],
             capture_output=True,
@@ -355,8 +433,10 @@ class VideoComposer:
                     self.ffprobe_path,
                     "-v",
                     "error",
+                    "-select_streams",
+                    "v:0",
                     "-show_entries",
-                    "format=duration",
+                    "stream=duration",
                     "-of",
                     "default=noprint_wrappers=1:nokey=1",
                     str(video_path),
@@ -365,7 +445,7 @@ class VideoComposer:
                 text=True,
                 timeout=10,
             )
-            if result.returncode == 0:
+            if result.returncode == 0 and result.stdout.strip():
                 return float(result.stdout.strip())
         except (subprocess.TimeoutExpired, ValueError, FileNotFoundError):
             pass
@@ -380,8 +460,17 @@ class VideoComposer:
                 str(input_path),
                 "-t",
                 str(duration),
-                "-c",
-                "copy",
+                "-c:v",
+                "libx264",
+                "-preset",
+                "fast",
+                "-crf",
+                "23",
+                "-pix_fmt",
+                "yuv420p",
+                "-r",
+                "30",
+                "-an",
                 str(output_path),
             ],
             capture_output=True,
