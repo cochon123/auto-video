@@ -399,6 +399,9 @@ def cmd_config(args: argparse.Namespace) -> int:
 
     config_path = args.config if args.config else get_default_config_path()
 
+    if args.section:
+        return cmd_config_edit_section(args)
+
     if args.show:
         try:
             config = load_config(config_path)
@@ -483,6 +486,147 @@ def cmd_config(args: argparse.Namespace) -> int:
 
     console.print("[yellow]Use --show to view configuration or --edit to edit it.[/yellow]")
     return 0
+
+
+def cmd_config_edit_section(args: argparse.Namespace) -> int:
+    """Edit a specific configuration section using wizard.
+
+    Args:
+        args: Command line arguments.
+
+    Returns:
+        Exit code (0 for success, non-zero for failure).
+    """
+    console = Console()
+    config_path = args.config if args.config else get_default_config_path()
+
+    try:
+        config = load_config(config_path)
+    except FileNotFoundError:
+        console.print(f"[red]Configuration file not found: {config_path}[/red]")
+        console.print("[yellow]Run 'auto-video setup' to create a configuration.[/yellow]")
+        return 1
+    except Exception as e:
+        console.print(f"[red]Failed to load configuration: {e}[/red]")
+        return 1
+
+    section = args.section
+
+    if section == "llm":
+        from auto_video.ui.setup import LLMSetupWizard
+
+        wizard = LLMSetupWizard(console)
+        result = wizard.run()
+
+        if not result.success or result.config is None:
+            console.print("[yellow]LLM configuration cancelled.[/yellow]")
+            return 1
+
+        config.llm = result.config
+        message = "LLM configuration updated"
+
+    elif section == "storage":
+        from auto_video.ui.setup import StorageSetupWizard
+
+        wizard = StorageSetupWizard(console)
+        result = wizard.run()
+
+        if not result.success or result.config is None:
+            console.print("[yellow]Storage configuration cancelled.[/yellow]")
+            return 1
+
+        config.storage = result.config
+        message = "Storage configuration updated"
+
+    elif section == "visuals":
+        from auto_video.ui.setup import VisualsSetupWizard
+
+        wizard = VisualsSetupWizard(console)
+        result = wizard.run()
+
+        if not result.success or result.config is None:
+            console.print("[yellow]Visuals configuration cancelled.[/yellow]")
+            return 1
+
+        config.visuals = result.config
+        message = "Visuals configuration updated"
+
+    elif section == "tts":
+        from auto_video.ui.setup import TTSImageSetupWizard
+
+        wizard = TTSImageSetupWizard(console)
+        result = wizard.run()
+
+        if not result.success or result.tts_config is None:
+            console.print("[yellow]TTS configuration cancelled.[/yellow]")
+            return 1
+
+        config.tts = result.tts_config
+        if result.image_config:
+            config.image_gen = result.image_config
+        message = "TTS configuration updated"
+
+    elif section == "image":
+        from auto_video.ui.setup import TTSImageSetupWizard
+
+        wizard = TTSImageSetupWizard(console)
+        result = wizard.run()
+
+        if not result.success or result.image_config is None:
+            console.print("[yellow]Image generation configuration cancelled.[/yellow]")
+            return 1
+
+        if result.tts_config:
+            config.tts = result.tts_config
+        config.image_gen = result.image_config
+        message = "Image generation configuration updated"
+
+    elif section == "youtube":
+        from auto_video.ui.setup import YouTubeSetupWizard
+
+        wizard = YouTubeSetupWizard(console)
+        result = wizard.run()
+
+        if not result.success or result.config is None:
+            console.print("[yellow]YouTube configuration cancelled.[/yellow]")
+            return 1
+
+        config.youtube = result.config
+        message = "YouTube configuration updated"
+
+    elif section == "prompts":
+        from auto_video.ui.setup import PromptsSetupWizard
+
+        wizard = PromptsSetupWizard(console)
+        result = wizard.run()
+
+        if not result.success:
+            console.print("[yellow]Prompts configuration cancelled.[/yellow]")
+            return 1
+
+        prompts_path = config_path.parent / "prompts"
+        prompts_path.mkdir(parents=True, exist_ok=True)
+
+        if result.general_prompt:
+            (prompts_path / "general.txt").write_text(result.general_prompt)
+        if result.targeted_prompt:
+            (prompts_path / "targeted.txt").write_text(result.targeted_prompt)
+        if result.image_prompt:
+            (prompts_path / "image.txt").write_text(result.image_prompt)
+
+        message = "Prompts configuration updated"
+
+    else:
+        console.print(f"[red]Unknown section: {section}[/red]")
+        return 1
+
+    try:
+        save_config(config, config_path)
+        console.print(f"[green]✓ {message} and saved to {config_path}[/green]")
+        return 0
+    except Exception as e:
+        console.print(f"[red]Failed to save configuration: {e}[/red]")
+        return 1
 
 
 def cmd_models(args: argparse.Namespace) -> int:
@@ -602,9 +746,36 @@ def main() -> int:
     resume_parser.add_argument("--video-id", type=str, required=True, help="Video ID to resume")
     resume_parser.add_argument("--step", type=int, help="Step number to resume from (1-7)")
 
-    config_parser = subparsers.add_parser("config", help="Manage configuration")
-    config_parser.add_argument("--show", action="store_true", help="Show current configuration")
-    config_parser.add_argument("--edit", action="store_true", help="Edit configuration in editor")
+    config_parser = subparsers.add_parser(
+        "config",
+        help="Manage configuration",
+        description=(
+            "Manage auto-video configuration.\n\n"
+            "Examples:\n"
+            "  auto-video config --show              View current configuration\n"
+            "  auto-video config --edit              Open config file in editor\n"
+            "  auto-video config --section llm       Edit LLM settings using wizard\n"
+            "  auto-video config --section storage    Edit storage paths using wizard\n"
+            "  auto-video config --section visuals    Edit visuals settings using wizard\n"
+            "  auto-video config --section tts         Edit TTS settings using wizard\n"
+            "  auto-video config --section image       Edit image generation settings using wizard\n"
+            "  auto-video config --section youtube    Edit YouTube settings using wizard\n"
+            "  auto-video config --section prompts    Edit prompt templates using wizard\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    config_parser.add_argument(
+        "--show", action="store_true", help="Show current configuration in table format"
+    )
+    config_parser.add_argument(
+        "--edit", action="store_true", help="Edit configuration file in default text editor"
+    )
+    config_parser.add_argument(
+        "--section",
+        type=str,
+        choices=["llm", "storage", "visuals", "tts", "image", "youtube", "prompts"],
+        help="Edit specific configuration section using interactive wizard (faster than full setup)",
+    )
 
     models_parser = subparsers.add_parser("models", help="Manage AI models")
     models_parser.add_argument("--list", action="store_true", help="List available models")

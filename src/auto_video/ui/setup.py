@@ -1964,6 +1964,7 @@ class SetupWizard:
         ]
 
         current_section = 0
+        edit_mode = False
 
         while True:
             if current_section >= len(sections):
@@ -1985,6 +1986,7 @@ class SetupWizard:
                             if key == section_name:
                                 current_section = idx
                                 break
+                        edit_mode = True
                     else:
                         current_section = len(sections)
                     continue
@@ -1996,7 +1998,11 @@ class SetupWizard:
                 result = runner()
 
                 if result:
-                    current_section += 1
+                    if edit_mode:
+                        edit_mode = False
+                        current_section = len(sections)
+                    else:
+                        current_section += 1
                 else:
                     if current_section == 0:
                         self.console.print("[yellow]Setup cancelled.[/yellow]")
