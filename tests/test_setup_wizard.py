@@ -105,7 +105,7 @@ def test_setup_api_provider(wizard):
     """Test setting up API provider."""
     with patch.object(wizard, "_select_api_provider", return_value="openai"):
         with patch.object(wizard, "_select_model", return_value="gpt-4o"):
-            with patch.object(wizard, "_get_api_key", return_value="sk-123"):
+            with patch("auto_video.ui.setup._get_api_key", return_value="sk-123"):
                 with patch("auto_video.ui.setup.Prompt.ask", return_value="0.7"):
                     config = wizard._setup_api_provider()
 

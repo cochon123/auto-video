@@ -46,6 +46,7 @@ class VisualsConfig(BaseModel):
     local_path: str | None = None
     pexels_api_key: str | None = None
     pixabay_api_key: str | None = None
+    visual_llm: LLMProviderConfig | None = None
 
 
 class StorageConfig(BaseModel):
@@ -66,6 +67,14 @@ class YouTubeConfig(BaseModel):
     auto_tags: bool = True
 
 
+class VideoConfig(BaseModel):
+    """Video encoding configuration."""
+
+    gpu_acceleration: Literal["auto", "nvenc", "amf", "qsv", "cpu", "none"] = "auto"
+    preset: Literal["slow", "medium", "fast", "veryfast", "ultrafast"] = "fast"
+    quality: int = 22
+
+
 class AppConfig(BaseModel):
     """Main application configuration."""
 
@@ -75,5 +84,6 @@ class AppConfig(BaseModel):
     image_gen: ImageGenConfig
     storage: StorageConfig
     youtube: YouTubeConfig
+    video: VideoConfig = VideoConfig()
     default_format: Literal["short", "long"] = "long"
     default_lang: str = "fr"

@@ -5,17 +5,15 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
+from auto_video.utils.security import sanitize_path_component
+
 
 class Workspace:
     """Manages temporary workspace for a single video."""
 
     def __init__(self, base_path: Path, video_id: str | None = None) -> None:
-        """Initialize workspace.
-
-        Args:
-            base_path: Base path for all workspaces.
-            video_id: Optional video ID. If None, generates a unique ID.
-        """
+        if video_id is not None:
+            video_id = sanitize_path_component(video_id)
         self._base_path = base_path
         self._video_id = video_id if video_id else self._generate_video_id()
         self._created = False
@@ -77,8 +75,8 @@ class Workspace:
         return self.workspace_path / "state.json"
 
     def create(self) -> None:
-        """Create the workspace directory structure."""
         self.workspace_path.mkdir(parents=True, exist_ok=True)
+        self.workspace_path.chmod(0o755)
         self._created = True
 
     def cleanup(self, keep_artifacts: bool = False) -> None:
@@ -152,7 +150,7 @@ class Workspace:
         Returns:
             Size in bytes, or 0 if artifact doesn't exist.
         """
-        path = getattr(self, f"{artifact}_path", None)
+        path: Path | None = getattr(self, f"{artifact}_path", None)
         if path is None or not path.exists():
             return 0
         return path.stat().st_size
@@ -167,7 +165,7 @@ class Workspace:
         Returns:
             Path to the copied file.
         """
-        source = getattr(self, f"{artifact}_path")
+        source: Path = getattr(self, f"{artifact}_path")
         if not source.exists():
             raise FileNotFoundError(f"Artifact not found: {artifact}")
 

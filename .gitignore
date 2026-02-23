@@ -1,13 +1,50 @@
 # Secrets and credentials
 .env
+.env.*
+*.env
 *_credentials.json
+*_credentials.yaml
+credentials.json
+credentials.yaml
+client_secrets.json
 secrets.yaml
 secrets.json
+secrets.*
 *.pem
 *.key
+*.p12
+*.pfx
+
+# OAuth tokens
+token.json
+*_token.json
+*.token
+oauth_token*
 
 # API keys in config (backup)
 config.local.yaml
+config.local.json
+config.*.local.yaml
+config.*.local.json
+
+# Service account files
+service-account*.json
+*-sa.json
+*-service-account.json
+
+# Private keys and certificates
+*.private.*
+id_rsa*
+*.crt
+*.cer
+*.der
+
+# Credential directories
+.credentials/
+.secrets/
+credentials/
+secrets/
+.secrets.d/
 
 # Python
 __pycache__/

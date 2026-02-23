@@ -1,21 +1,29 @@
 """Setup wizard UI for LLM configuration."""
 
+import json
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
+import httpx
 from rich.console import Console
 from rich.panel import Panel
 from rich.prompt import Confirm, Prompt
 from rich.table import Table
 
+from auto_video.config.loader import get_default_config_path, save_config
 from auto_video.config.schema import (
+    AppConfig,
     ImageGenConfig,
     LLMProviderConfig,
     StorageConfig,
     TTSConfig,
     VisualsConfig,
+    YouTubeConfig,
 )
+
+PrivacyType = Literal["public", "unlisted", "private"]
 
 
 def _get_api_key(console: Console, provider: str) -> str | None:
@@ -185,11 +193,51 @@ class LLMSetupWizard:
         """
         host = Prompt.ask("Ollama host", default="http://localhost:11434")
 
-        model = Prompt.ask("Ollama model name", default="llama3.2")
+        available_models = self._get_ollama_models(host)
+
+        if available_models:
+            self.console.print("[bold]Available models on Ollama:[/bold]")
+            for idx, model in enumerate(available_models, 1):
+                self.console.print(f"  {idx}. {model}")
+
+            choices = [str(i) for i in range(1, len(available_models) + 1)]
+            selection = Prompt.ask("Select model", choices=choices, default="1")
+            model = available_models[int(selection) - 1]
+        else:
+            self.console.print("[yellow]Could not fetch models from Ollama.[/yellow]")
+            model = Prompt.ask("Ollama model name", default="llama3.2")
 
         temperature = self._get_temperature()
 
         return LLMProviderConfig(provider="ollama", model=model, host=host, temperature=temperature)
+
+    def _get_ollama_models(self, host: str) -> list[str]:
+        """Get available models from Ollama.
+
+        Args:
+            host: Ollama host URL.
+
+        Returns:
+            List of available model names.
+        """
+        try:
+            with httpx.Client(timeout=10.0) as client:
+                response = client.get(f"{host.rstrip('/')}/api/tags")
+                if response.status_code == 200:
+                    data = response.json()
+                    models = data.get("models", [])
+                    result = []
+                    for m in models:
+                        name = m.get("name", "")
+                        if name:
+                            model_name = name.split(":")[0]
+                            if "/" in model_name:
+                                model_name = model_name.split("/")[-1]
+                            result.append(model_name)
+                    return result
+        except Exception:
+            pass
+        return []
 
     def _setup_hybrid_provider(self) -> LLMProviderConfig | None:
         """Setup hybrid LLM provider.
@@ -208,9 +256,23 @@ class LLMSetupWizard:
 
         local_host = Prompt.ask("Local Ollama host", default="http://localhost:11434")
 
+        available_models = self._get_ollama_models(local_host)
+
+        if available_models:
+            self.console.print("[bold]Available models on Ollama:[/bold]")
+            for idx, model in enumerate(available_models, 1):
+                self.console.print(f"  {idx}. {model}")
+
+            choices = [str(i) for i in range(1, len(available_models) + 1)]
+            selection = Prompt.ask("Select model", choices=choices, default="1")
+            model = available_models[int(selection) - 1]
+        else:
+            self.console.print("[yellow]Could not fetch models from Ollama.[/yellow]")
+            model = Prompt.ask("Ollama model name", default="llama3.2")
+
         return LLMProviderConfig(
-            provider=api_config.provider,
-            model=api_config.model,
+            provider="ollama",
+            model=model,
             api_key=api_config.api_key,
             host=local_host,
             temperature=api_config.temperature,
@@ -227,6 +289,7 @@ class LLMSetupWizard:
             ("anthropic", "Anthropic (Claude 3)"),
             ("groq", "Groq (Fast Llama API)"),
             ("google", "Google (Gemini)"),
+            ("zhipuai", "Zhipu AI (z.ai)"),
         ]
 
         table = Table(title="Available API Providers")
@@ -258,7 +321,8 @@ class LLMSetupWizard:
             "openai": ["gpt-4o", "gpt-4-turbo", "gpt-3.5-turbo"],
             "anthropic": ["claude-3-opus", "claude-3-sonnet", "claude-3-haiku"],
             "groq": ["llama3.1-70b", "mixtral-8x7b", "gemma-7b"],
-            "google": ["gemini-1.5-pro", "gemini-1.5-flash"],
+            "google": ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.5-pro"],
+            "zhipuai": ["glm-4.5", "glm-4-flash", "glm-4-long", "glm-z1-air"],
         }
 
         provider_models = models.get(provider, [])
@@ -364,11 +428,11 @@ class LLMSetupWizard:
         self.console.print("[cyan]Testing connection...[/cyan]")
 
         try:
-            from auto_video.core.llm import LLM  # type: ignore
+            from auto_video.core.llm import LLM
 
             llm = LLM(config)
             test_prompt = "Say 'test'"
-            response = llm.generate(test_prompt)
+            response = llm.provider.generate(test_prompt)
 
             if response:
                 self.console.print("[green]✓ Connection successful![/green]")
@@ -696,7 +760,153 @@ class VisualsSetupWizard:
         if not providers:
             return None
 
-        return VisualsConfig(mode="stock", providers=providers)
+        visual_llm = self._setup_visual_llm()
+
+        return VisualsConfig(
+            mode="stock",
+            providers=providers,
+            visual_llm=visual_llm,
+            pexels_api_key=self._get_api_key("pexels"),
+            pixabay_api_key=self._get_api_key("pixabay"),
+        )
+
+    def _setup_visual_llm(self) -> LLMProviderConfig | None:
+        """Setup visual LLM for segment-based keyword extraction.
+
+        Returns:
+            LLM configuration for visual keyword extraction, or None if not configured.
+        """
+        self.console.print()
+        if not Confirm.ask(
+            "Use AI to generate specific keywords for each video segment?\n"
+            "  (This improves clip-to-script matching but uses more API calls)",
+            default=False,
+        ):
+            return None
+
+        self.console.print("\n[bold]Configure Visual Keyword Extractor:[/bold]")
+        self.console.print(
+            "  You can use a different (smaller/faster) LLM for keyword extraction.\n"
+            "  This is optional - if not set, global keywords will be used."
+        )
+
+        providers = [
+            ("openai", "OpenAI (GPT-4o Mini - fast & cheap)"),
+            ("anthropic", "Anthropic (Claude 3 Haiku)"),
+            ("groq", "Groq (Very fast)"),
+            ("google", "Google (Gemini 2.0 Flash)"),
+            ("ollama", "Ollama (Local - no API cost)"),
+            ("zhipuai", "Zhipu AI (z.ai - Chinese models)"),
+        ]
+
+        table = Table(title="Visual LLM Providers")
+        table.add_column("ID", style="cyan")
+        table.add_column("Provider", style="green")
+        table.add_column("Notes", style="yellow")
+
+        for idx, (name, desc) in enumerate(providers, 1):
+            table.add_row(str(idx), name, desc)
+
+        self.console.print(table)
+
+        choices = [str(i) for i in range(1, len(providers) + 1)]
+        selection = Prompt.ask(
+            "Select provider for visual keywords",
+            choices=choices,
+            default="1",
+        )
+
+        provider_name = providers[int(selection) - 1][0]
+
+        if provider_name == "ollama":
+            host = Prompt.ask("Ollama host", default="http://localhost:11434")
+            available_models = self._get_ollama_models(host)
+            if available_models:
+                self.console.print("[bold]Available models:[/bold]")
+                for idx, model in enumerate(available_models, 1):
+                    self.console.print(f"  {idx}. {model}")
+                choices = [str(i) for i in range(1, len(available_models) + 1)]
+                selection = Prompt.ask("Select model", choices=choices, default="1")
+                model = available_models[int(selection) - 1]
+            else:
+                model = Prompt.ask("Ollama model name", default="llama3.2")
+
+            return LLMProviderConfig(
+                provider=provider_name,
+                model=model,
+                host=host,
+                temperature=0.5,
+            )
+
+        api_key = Prompt.ask(
+            f"Enter {provider_name} API key",
+            password=True,
+        )
+
+        if not api_key:
+            self.console.print("[yellow]No API key provided, skipping visual LLM[/yellow]")
+            return None
+
+        default_models = {
+            "openai": "gpt-4o-mini",
+            "anthropic": "claude-3-haiku-20240307",
+            "groq": "llama-3.1-8b-instant",
+            "google": "gemini-2.0-flash-exp",
+            "zhipuai": "glm-4-flash",
+        }
+        model = Prompt.ask(
+            "Model name",
+            default=default_models.get(provider_name, "default"),
+        )
+
+        return LLMProviderConfig(
+            provider=provider_name,
+            model=model,
+            api_key=api_key,
+            temperature=0.5,
+        )
+
+    def _get_ollama_models(self, host: str) -> list[str]:
+        """Get available models from Ollama.
+
+        Args:
+            host: Ollama host URL.
+
+        Returns:
+            List of available model names.
+        """
+        try:
+            with httpx.Client(timeout=10.0) as client:
+                response = client.get(f"{host.rstrip('/')}/api/tags")
+                if response.status_code == 200:
+                    data = response.json()
+                    models = data.get("models", [])
+                    result = []
+                    for m in models:
+                        name = m.get("name", "")
+                        if name:
+                            model_name = name.split(":")[0]
+                            if "/" in model_name:
+                                model_name = model_name.split("/")[-1]
+                            result.append(model_name)
+                    return result
+        except Exception:
+            pass
+        return []
+
+    def _get_api_key(self, provider: str) -> str | None:
+        """Get stored API key for a provider."""
+        try:
+            from auto_video.config.loader import get_default_config_path, load_config
+
+            config = load_config(get_default_config_path())
+            if provider == "pexels":
+                return config.visuals.pexels_api_key
+            elif provider == "pixabay":
+                return config.visuals.pixabay_api_key
+        except Exception:
+            pass
+        return None
 
     def _setup_pexels(self) -> str | None:
         """Setup Pexels provider.
@@ -785,9 +995,11 @@ class VisualsSetupWizard:
 
         providers = []
         local_path = None
+        visual_llm = None
 
         if stock_config:
             providers = stock_config.providers or []
+            visual_llm = stock_config.visual_llm
 
         if local_config:
             local_path = local_config.local_path
@@ -796,7 +1008,14 @@ class VisualsSetupWizard:
             self.console.print("[red]✗ At least one source must be configured[/red]")
             return None
 
-        return VisualsConfig(mode="hybrid", providers=providers, local_path=local_path)
+        return VisualsConfig(
+            mode="hybrid",
+            providers=providers,
+            local_path=local_path,
+            visual_llm=visual_llm,
+            pexels_api_key=self._get_api_key("pexels"),
+            pixabay_api_key=self._get_api_key("pixabay"),
+        )
 
     def _show_summary(self, config: VisualsConfig) -> None:
         """Display configuration summary.
@@ -1134,9 +1353,12 @@ class TTSImageSetupWizard:
         self.console.print("[cyan]Testing image generation...[/cyan]")
 
         try:
-            from auto_video.core.thumbnail import ThumbnailGenerator  # type: ignore
+            # Create a minimal LLM config for testing
+            from auto_video.config.schema import LLMProviderConfig
+            from auto_video.core.thumbnail import ThumbnailGenerator
 
-            generator = ThumbnailGenerator(config)
+            llm_config = LLMProviderConfig(provider="openai", model="gpt-4")
+            generator = ThumbnailGenerator(config, llm_config)
 
             with tempfile.TemporaryDirectory() as tmpdir:
                 output_path = Path(tmpdir) / "test_image.png"
@@ -1400,3 +1622,687 @@ class PromptsSetupWizard:
                 title="[green]Prompts Configuration Summary[/green]",
             )
         )
+
+
+YOUTUBE_CATEGORIES = {
+    "1": "Film & Animation",
+    "2": "Autos & Vehicles",
+    "10": "Music",
+    "15": "Pets & Animals",
+    "17": "Sports",
+    "18": "Short Movies",
+    "19": "Travel & Events",
+    "20": "Gaming",
+    "21": "Videoblogging",
+    "22": "People & Blogs",
+    "23": "Comedy",
+    "24": "Entertainment",
+    "25": "News & Politics",
+    "26": "Howto & Style",
+    "27": "Education",
+    "28": "Science & Technology",
+    "29": "Nonprofits & Activism",
+}
+
+
+@dataclass
+class YouTubeSetupResult:
+    """Result of YouTube setup wizard."""
+
+    config: YouTubeConfig | None
+    success: bool
+    message: str
+
+
+class YouTubeSetupWizard:
+    """Wizard for setting up YouTube upload configuration."""
+
+    def __init__(self, console: Console | None = None) -> None:
+        """Initialize wizard.
+
+        Args:
+            console: Rich console instance. If None, creates a new one.
+        """
+        self.console = console or Console()
+
+    def run(self) -> YouTubeSetupResult:
+        """Run YouTube setup wizard.
+
+        Returns:
+            Setup result with configuration.
+        """
+        self._show_welcome()
+
+        enabled = self._ask_enable_youtube()
+
+        if not enabled:
+            config = YouTubeConfig(enabled=False)
+            self._show_summary(config)
+            return YouTubeSetupResult(
+                config=config,
+                success=True,
+                message="YouTube upload disabled",
+            )
+
+        credentials_path = self._ask_credentials_path()
+
+        if not credentials_path:
+            return YouTubeSetupResult(
+                config=None,
+                success=False,
+                message="Setup cancelled - credentials required",
+            )
+
+        privacy = self._select_privacy()
+        category = self._select_category()
+        auto_tags = self._ask_auto_tags()
+
+        config = YouTubeConfig(
+            enabled=True,
+            credentials_path=credentials_path,
+            default_privacy=privacy,
+            default_category=category,
+            auto_tags=auto_tags,
+        )
+
+        self._show_summary(config)
+        return YouTubeSetupResult(
+            config=config,
+            success=True,
+            message="YouTube configured successfully",
+        )
+
+    def _show_welcome(self) -> None:
+        """Display welcome screen."""
+        self.console.print(
+            Panel.fit(
+                "[bold blue]YouTube Upload Configuration Wizard[/bold blue]\n\n"
+                "This wizard will help you configure YouTube upload "
+                "for your generated videos.\n\n"
+                "[dim]You will need a Google Cloud OAuth2 credentials file "
+                "(credentials.json).[/dim]",
+                title="Auto-Video Setup",
+            )
+        )
+        self.console.print()
+
+    def _ask_enable_youtube(self) -> bool:
+        """Ask whether to enable YouTube upload.
+
+        Returns:
+            True if user wants to enable YouTube, False otherwise.
+        """
+        return Confirm.ask(
+            "Do you want to enable YouTube upload?",
+            default=False,
+        )
+
+    def _ask_credentials_path(self) -> Path | None:
+        """Ask for path to credentials.json.
+
+        Returns:
+            Path to credentials file or None if cancelled.
+        """
+        self.console.print()
+        self.console.print(
+            "[dim]You need a Google Cloud OAuth2 credentials file. "
+            "Get it from: https://console.cloud.google.com/apis/credentials[/dim]"
+        )
+        self.console.print()
+
+        while True:
+            path_str = Prompt.ask(
+                "Enter path to credentials.json",
+                default=str(Path.home() / ".config" / "auto-video" / "credentials.json"),
+            )
+
+            path = Path(path_str).expanduser()
+
+            if not path.exists():
+                self.console.print(f"[red]✗ File does not exist: {path}[/red]")
+                if not Confirm.ask("Try another path?", default=True):
+                    return None
+                continue
+
+            if not path.is_file():
+                self.console.print(f"[red]✗ Path is not a file: {path}[/red]")
+                if not Confirm.ask("Try another path?", default=True):
+                    return None
+                continue
+
+            validation_result = self._validate_credentials_file(path)
+
+            if validation_result:
+                self.console.print("[green]✓ Credentials file is valid JSON[/green]")
+                return path
+
+            if not Confirm.ask("Try another path?", default=True):
+                return None
+
+    def _validate_credentials_file(self, path: Path) -> bool:
+        """Validate that credentials file is valid JSON.
+
+        Args:
+            path: Path to credentials file.
+
+        Returns:
+            True if valid JSON, False otherwise.
+        """
+        try:
+            content = path.read_text()
+            data = json.loads(content)
+
+            if "installed" in data or "web" in data:
+                return True
+
+            self.console.print(
+                "[yellow]⚠ File is valid JSON but may not be a valid "
+                "OAuth2 credentials file[/yellow]"
+            )
+            self.console.print(
+                "[dim]Expected 'installed' or 'web' key for OAuth2 credentials[/dim]"
+            )
+            return Confirm.ask("Continue anyway?", default=True)
+
+        except json.JSONDecodeError as e:
+            self.console.print(f"[red]✗ Invalid JSON: {e}[/red]")
+            return False
+        except Exception as e:
+            self.console.print(f"[red]✗ Error reading file: {e}[/red]")
+            return False
+
+    def _select_privacy(self) -> PrivacyType:
+        """Select default privacy setting.
+
+        Returns:
+            Privacy setting (public, unlisted, or private).
+        """
+        self.console.print()
+        self.console.print("[bold]Select Default Privacy:[/bold]")
+        self.console.print()
+
+        choices = [
+            ("1", "public", "Anyone can search for and view your video"),
+            ("2", "unlisted", "Anyone with the link can view your video"),
+            ("3", "private", "Only you and selected users can view"),
+        ]
+
+        for idx, name, desc in choices:
+            self.console.print(f"  {idx}. [cyan]{name}[/cyan] - {desc}")
+
+        self.console.print()
+        selection = Prompt.ask(
+            "Select privacy",
+            choices=["1", "2", "3"],
+            default="2",
+        )
+
+        privacy_map: dict[str, PrivacyType] = {
+            "1": "public",
+            "2": "unlisted",
+            "3": "private",
+        }
+        return privacy_map[selection]
+
+    def _select_category(self) -> str:
+        """Select default YouTube category.
+
+        Returns:
+            Category ID.
+        """
+        self.console.print()
+        table = Table(title="YouTube Video Categories")
+        table.add_column("ID", style="cyan")
+        table.add_column("Category", style="green")
+
+        for cat_id, cat_name in YOUTUBE_CATEGORIES.items():
+            table.add_row(cat_id, cat_name)
+
+        self.console.print(table)
+        self.console.print()
+
+        valid_ids = list(YOUTUBE_CATEGORIES.keys())
+        selection = Prompt.ask(
+            "Select default category",
+            choices=valid_ids,
+            default="22",
+        )
+
+        return selection
+
+    def _ask_auto_tags(self) -> bool:
+        """Ask whether to auto-generate tags.
+
+        Returns:
+            True if auto-tags enabled, False otherwise.
+        """
+        self.console.print()
+        self.console.print(
+            "[dim]Auto-tags will extract keywords from the video script and add them as tags.[/dim]"
+        )
+        return Confirm.ask(
+            "Enable automatic tag generation?",
+            default=True,
+        )
+
+    def _show_summary(self, config: YouTubeConfig) -> None:
+        """Display configuration summary.
+
+        Args:
+            config: YouTube configuration.
+        """
+        self.console.print()
+
+        if not config.enabled:
+            self.console.print(
+                Panel(
+                    "[bold]YouTube Upload:[/bold] Disabled",
+                    title="[green]YouTube Configuration Summary[/green]",
+                )
+            )
+            return
+
+        category_name = YOUTUBE_CATEGORIES.get(config.default_category, "Unknown")
+        credentials_display = str(config.credentials_path) if config.credentials_path else "Not set"
+
+        self.console.print(
+            Panel(
+                f"[bold]Enabled:[/bold] Yes\n"
+                f"[bold]Credentials:[/bold] {credentials_display}\n"
+                f"[bold]Default Privacy:[/bold] {config.default_privacy}\n"
+                f"[bold]Default Category:[/bold] {config.default_category} ({category_name})\n"
+                f"[bold]Auto Tags:[/bold] {'Enabled' if config.auto_tags else 'Disabled'}",
+                title="[green]YouTube Configuration Summary[/green]",
+            )
+        )
+
+
+class SetupWizard:
+    """Main setup wizard that orchestrates all individual wizards."""
+
+    def __init__(self, config_path: Path | None = None) -> None:
+        """Initialize the setup wizard.
+
+        Args:
+            config_path: Path to save configuration. If None, uses default path.
+        """
+        self.console = Console()
+        self.config_path = config_path or get_default_config_path()
+
+        self.llm_wizard = LLMSetupWizard(self.console)
+        self.storage_wizard = StorageSetupWizard(self.console)
+        self.visuals_wizard = VisualsSetupWizard(self.console)
+        self.tts_image_wizard = TTSImageSetupWizard(self.console)
+        self.prompts_wizard = PromptsSetupWizard(self.console)
+        self.youtube_wizard = YouTubeSetupWizard(self.console)
+
+        self.llm_config: LLMProviderConfig | None = None
+        self.storage_config: StorageConfig | None = None
+        self.visuals_config: VisualsConfig | None = None
+        self.tts_config: TTSConfig | None = None
+        self.image_config: ImageGenConfig | None = None
+        self.youtube_config: YouTubeConfig | None = None
+        self.general_prompt: str = ""
+        self.targeted_prompt: str = ""
+        self.image_prompt: str = ""
+
+    def run(self) -> AppConfig | None:
+        """Run the complete setup wizard.
+
+        Returns:
+            Complete AppConfig if successful, None if cancelled.
+        """
+        self._show_welcome()
+
+        sections = [
+            ("llm", "LLM Provider", self._run_llm_wizard),
+            ("storage", "Storage", self._run_storage_wizard),
+            ("visuals", "Visuals", self._run_visuals_wizard),
+            ("tts_image", "TTS and Images", self._run_tts_image_wizard),
+            ("prompts", "Prompts", self._run_prompts_wizard),
+            ("youtube", "YouTube", self._run_youtube_wizard),
+        ]
+
+        current_section = 0
+
+        while True:
+            if current_section >= len(sections):
+                config = self._build_config()
+                if config is None:
+                    self.console.print("[red]Failed to build configuration[/red]")
+                    return None
+
+                self._show_final_summary(config)
+                action = self._ask_confirmation()
+
+                if action == "confirm":
+                    self._save_config(config)
+                    return config
+                elif action == "modify":
+                    section_name = self._select_section_to_modify()
+                    if section_name:
+                        for idx, (key, _, _) in enumerate(sections):
+                            if key == section_name:
+                                current_section = idx
+                                break
+                    else:
+                        current_section = len(sections)
+                    continue
+                else:
+                    self.console.print("[yellow]Setup cancelled.[/yellow]")
+                    return None
+            else:
+                key, name, runner = sections[current_section]
+                result = runner()
+
+                if result:
+                    current_section += 1
+                else:
+                    if current_section == 0:
+                        self.console.print("[yellow]Setup cancelled.[/yellow]")
+                        return None
+                    current_section = max(0, current_section - 1)
+
+    def _show_welcome(self) -> None:
+        """Display welcome screen."""
+        self.console.print()
+        self.console.print(
+            Panel.fit(
+                "[bold blue]Auto-Video Setup Wizard[/bold blue]\n\n"
+                "This wizard will guide you through the complete setup process.\n"
+                "You will configure:\n\n"
+                "  • LLM Provider (OpenAI, Anthropic, Groq, Google, or Local)\n"
+                "  • Storage paths for videos and temporary files\n"
+                "  • Visuals source (Stock footage, Local, or AI-generated)\n"
+                "  • TTS and Image generation\n"
+                "  • Custom prompts for script generation\n"
+                "  • YouTube upload settings\n\n"
+                "[dim]Press Ctrl+C at any time to cancel.[/dim]",
+                title="[cyan]Welcome[/cyan]",
+            )
+        )
+        self.console.print()
+
+        Confirm.ask("Ready to begin?", default=True, console=self.console)
+        self.console.print()
+
+    def _run_llm_wizard(self) -> bool:
+        """Run LLM setup wizard.
+
+        Returns:
+            True if successful, False otherwise.
+        """
+        result = self.llm_wizard.run()
+        if result.success and result.config:
+            self.llm_config = result.config
+            return True
+        return False
+
+    def _run_storage_wizard(self) -> bool:
+        """Run storage setup wizard.
+
+        Returns:
+            True if successful, False otherwise.
+        """
+        result = self.storage_wizard.run()
+        if result.success and result.config:
+            self.storage_config = result.config
+            return True
+        return False
+
+    def _run_visuals_wizard(self) -> bool:
+        """Run visuals setup wizard.
+
+        Returns:
+            True if successful, False otherwise.
+        """
+        result = self.visuals_wizard.run()
+        if result.success and result.config:
+            self.visuals_config = result.config
+            return True
+        return False
+
+    def _run_tts_image_wizard(self) -> bool:
+        """Run TTS and Image setup wizard.
+
+        Returns:
+            True if successful, False otherwise.
+        """
+        result = self.tts_image_wizard.run()
+        if result.success and result.tts_config:
+            self.tts_config = result.tts_config
+            self.image_config = result.image_config
+            return True
+        return False
+
+    def _run_prompts_wizard(self) -> bool:
+        """Run prompts setup wizard.
+
+        Returns:
+            True if successful, False otherwise.
+        """
+        result = self.prompts_wizard.run()
+        if result.success:
+            self.general_prompt = result.general_prompt
+            self.targeted_prompt = result.targeted_prompt
+            self.image_prompt = result.image_prompt
+            return True
+        return False
+
+    def _run_youtube_wizard(self) -> bool:
+        """Run YouTube setup wizard.
+
+        Returns:
+            True if successful, False otherwise.
+        """
+        result = self.youtube_wizard.run()
+        if result.success and result.config:
+            self.youtube_config = result.config
+            return True
+        return False
+
+    def _build_config(self) -> AppConfig | None:
+        """Build AppConfig from collected configurations.
+
+        Returns:
+            AppConfig if all required configs are present, None otherwise.
+        """
+        if not self.llm_config:
+            self.console.print("[red]LLM configuration is missing[/red]")
+            return None
+
+        if not self.storage_config:
+            self.console.print("[red]Storage configuration is missing[/red]")
+            return None
+
+        if not self.visuals_config:
+            self.console.print("[red]Visuals configuration is missing[/red]")
+            return None
+
+        if not self.tts_config:
+            self.console.print("[red]TTS configuration is missing[/red]")
+            return None
+
+        image_config = self.image_config or ImageGenConfig(enabled=False)
+        youtube_config = self.youtube_config or YouTubeConfig(enabled=False)
+
+        return AppConfig(
+            llm=self.llm_config,
+            tts=self.tts_config,
+            visuals=self.visuals_config,
+            image_gen=image_config,
+            storage=self.storage_config,
+            youtube=youtube_config,
+        )
+
+    def _show_final_summary(self, config: AppConfig) -> None:
+        """Display complete configuration summary.
+
+        Args:
+            config: Complete application configuration.
+        """
+        self.console.print()
+        self.console.print(
+            "[bold]═══════════════════════════════════════════════════════════[/bold]"
+        )
+        self.console.print("[bold cyan]           FINAL CONFIGURATION SUMMARY[/bold cyan]")
+        self.console.print(
+            "[bold]═══════════════════════════════════════════════════════════[/bold]"
+        )
+        self.console.print()
+
+        table = Table(show_header=True, header_style="bold magenta", box=None)
+        table.add_column("Section", style="cyan", width=20)
+        table.add_column("Configuration", style="white")
+
+        table.add_row("LLM Provider", f"{config.llm.provider} / {config.llm.model}")
+        table.add_row("LLM Temperature", f"{config.llm.temperature}")
+
+        api_key_display = "***" if config.llm.api_key else "Not set"
+        table.add_row("LLM API Key", api_key_display)
+
+        if config.llm.host:
+            table.add_row("LLM Host", config.llm.host)
+
+        table.add_row("TTS Mode", config.tts.mode)
+        table.add_row("TTS Voice", config.tts.voice)
+
+        if config.tts.provider:
+            table.add_row("TTS Provider", config.tts.provider)
+
+        table.add_row("Visuals Mode", config.visuals.mode)
+
+        if config.visuals.providers:
+            table.add_row("Visuals Providers", ", ".join(config.visuals.providers))
+
+        if config.visuals.local_path:
+            table.add_row("Visuals Local Path", config.visuals.local_path)
+
+        if config.image_gen.enabled:
+            table.add_row("Image Generation", f"{config.image_gen.mode} ({config.image_gen.model})")
+        else:
+            table.add_row("Image Generation", "Disabled")
+
+        table.add_row("Videos Path", str(config.storage.videos_path))
+        table.add_row("Temp Path", str(config.storage.temp_path))
+        table.add_row("Keep Temp Files", "Yes" if config.storage.keep_temp else "No")
+
+        if config.youtube.enabled:
+            table.add_row("YouTube Upload", "Enabled")
+            table.add_row("YouTube Privacy", config.youtube.default_privacy)
+            if config.youtube.credentials_path:
+                table.add_row("YouTube Credentials", str(config.youtube.credentials_path))
+        else:
+            table.add_row("YouTube Upload", "Disabled")
+
+        table.add_row("Default Format", config.default_format)
+        table.add_row("Default Language", config.default_lang)
+
+        self.console.print(table)
+        self.console.print()
+
+        self.console.print("[dim]Prompts:[/dim]")
+        self.console.print(f"  General: {len(self.general_prompt)} chars")
+        self.console.print(f"  Targeted: {len(self.targeted_prompt)} chars")
+        self.console.print(f"  Image: {len(self.image_prompt)} chars")
+        self.console.print()
+
+        self.console.print(f"[dim]Configuration will be saved to: {self.config_path}[/dim]")
+        self.console.print()
+
+    def _ask_confirmation(self) -> str:
+        """Ask user for confirmation.
+
+        Returns:
+            "confirm", "modify", or "cancel".
+        """
+        self.console.print("[bold]What would you like to do?[/bold]")
+        self.console.print()
+
+        choices = [
+            "1. Confirm and save configuration",
+            "2. Modify a section",
+            "3. Cancel setup",
+        ]
+
+        for choice in choices:
+            self.console.print(f"  {choice}")
+
+        self.console.print()
+        selection = Prompt.ask(
+            "Select option",
+            choices=["1", "2", "3"],
+            default="1",
+        )
+
+        if selection == "1":
+            return "confirm"
+        elif selection == "2":
+            return "modify"
+        else:
+            return "cancel"
+
+    def _select_section_to_modify(self) -> str | None:
+        """Let user select which section to modify.
+
+        Returns:
+            Section name or None if cancelled.
+        """
+        self.console.print()
+        self.console.print("[bold]Which section would you like to modify?[/bold]")
+        self.console.print()
+
+        sections = [
+            ("llm", "LLM Provider"),
+            ("storage", "Storage"),
+            ("visuals", "Visuals"),
+            ("tts_image", "TTS and Images"),
+            ("prompts", "Prompts"),
+            ("youtube", "YouTube"),
+        ]
+
+        for idx, (_, name) in enumerate(sections, 1):
+            self.console.print(f"  {idx}. {name}")
+
+        self.console.print(f"  {len(sections) + 1}. Go back to summary")
+
+        choices = [str(i) for i in range(1, len(sections) + 2)]
+        self.console.print()
+        selection = Prompt.ask(
+            "Select section",
+            choices=choices,
+            default=str(len(sections) + 1),
+        )
+
+        idx = int(selection) - 1
+
+        if idx < len(sections):
+            return sections[idx][0]
+
+        return None
+
+    def _save_config(self, config: AppConfig) -> None:
+        """Save configuration to file.
+
+        Args:
+            config: Configuration to save.
+        """
+        try:
+            self.config_path.parent.mkdir(parents=True, exist_ok=True)
+
+            save_config(config, self.config_path)
+
+            self.console.print()
+            self.console.print(
+                Panel.fit(
+                    f"[bold green]Configuration saved successfully![/bold green]\n\n"
+                    f"Config file: {self.config_path}\n\n"
+                    "[dim]You can now run 'auto-video create' to generate videos.[/dim]",
+                    title="[green]Setup Complete[/green]",
+                )
+            )
+            self.console.print()
+
+        except Exception as e:
+            self.console.print(f"[red]Failed to save configuration: {e}[/red]")
+            self.console.print("[yellow]Please check file permissions and try again.[/yellow]")

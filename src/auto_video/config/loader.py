@@ -1,18 +1,19 @@
 """Configuration loader."""
 
+import logging
 import os
 from pathlib import Path
+from typing import Any
 
 import yaml
 
 from auto_video.config.schema import AppConfig
+from auto_video.utils.security import mask_secrets_in_string
+
+logger = logging.getLogger(__name__)
 
 
 def _substitute_env_vars(value: str) -> str:
-    """Substitute environment variables in a string.
-
-    Supports ${VAR_NAME} and $VAR_NAME syntax.
-    """
     if not isinstance(value, str):
         return value
 
@@ -27,8 +28,7 @@ def _substitute_env_vars(value: str) -> str:
     return value
 
 
-def _substitute_env_vars_recursive(data: dict | list | str) -> dict | list | str:
-    """Recursively substitute environment variables in a data structure."""
+def _substitute_env_vars_recursive(data: Any) -> Any:
     if isinstance(data, dict):
         return {k: _substitute_env_vars_recursive(v) for k, v in data.items()}
     if isinstance(data, list):
@@ -39,38 +39,33 @@ def _substitute_env_vars_recursive(data: dict | list | str) -> dict | list | str
 
 
 def save_config(config: AppConfig, path: Path) -> None:
-    """Save configuration to a YAML file.
-
-    Args:
-        config: Configuration to save.
-        path: Path to save the configuration file.
-    """
     path.parent.mkdir(parents=True, exist_ok=True)
 
     config_dict = config.model_dump(mode="json")
 
-    with path.open("w") as f:
-        yaml.dump(config_dict, f, default_flow_style=False, sort_keys=False)
+    old_umask = os.umask(0o077)
+    try:
+        with path.open("w") as f:
+            yaml.dump(config_dict, f, default_flow_style=False, sort_keys=False)
+    finally:
+        os.umask(old_umask)
+
+    try:
+        path.chmod(0o600)
+    except OSError:
+        pass
 
 
 def load_config(path: Path) -> AppConfig:
-    """Load configuration from a YAML file.
-
-    Args:
-        path: Path to the configuration file.
-
-    Returns:
-        Loaded configuration.
-
-    Raises:
-        FileNotFoundError: If the configuration file does not exist.
-        ValueError: If the configuration is invalid.
-    """
     if not path.exists():
         raise FileNotFoundError(f"Configuration file not found: {path}")
 
-    with path.open("r") as f:
-        data = yaml.safe_load(f)
+    try:
+        with path.open("r") as f:
+            data = yaml.safe_load(f)
+    except yaml.YAMLError as e:
+        masked_error = mask_secrets_in_string(str(e))
+        raise ValueError(f"Invalid YAML in configuration file: {masked_error}") from e
 
     if not isinstance(data, dict):
         raise ValueError(f"Invalid configuration format in {path}")
@@ -80,11 +75,14 @@ def load_config(path: Path) -> AppConfig:
     if isinstance(data, dict):
         data = _convert_paths_to_path_objects(data)
 
-    return AppConfig.model_validate(data)
+    try:
+        return AppConfig.model_validate(data)
+    except Exception as e:
+        masked_error = mask_secrets_in_string(str(e))
+        raise ValueError(f"Invalid configuration: {masked_error}") from e
 
 
-def _convert_paths_to_path_objects(data: dict | list | str) -> dict | list | str:
-    """Convert path strings to Path objects in configuration data."""
+def _convert_paths_to_path_objects(data: Any) -> Any:
     if isinstance(data, list):
         return [_convert_paths_to_path_objects(item) for item in data]
     if isinstance(data, str):
@@ -107,29 +105,17 @@ def _convert_paths_to_path_objects(data: dict | list | str) -> dict | list | str
 
 
 def get_default_config_path() -> Path:
-    """Get the default configuration file path.
-
-    Returns:
-        Path to ~/.config/auto-video/config.yaml
-    """
     config_dir = Path.home() / ".config" / "auto-video"
     return config_dir / "config.yaml"
 
 
 def create_default_config(path: Path) -> AppConfig:
-    """Create a default configuration file.
-
-    Args:
-        path: Path to save the default configuration.
-
-    Returns:
-        Default configuration.
-    """
     from auto_video.config.schema import (
         ImageGenConfig,
         LLMProviderConfig,
         StorageConfig,
         TTSConfig,
+        VideoConfig,
         VisualsConfig,
         YouTubeConfig,
     )
@@ -150,6 +136,7 @@ def create_default_config(path: Path) -> AppConfig:
             keep_temp=True,
         ),
         youtube=YouTubeConfig(enabled=False),
+        video=VideoConfig(gpu_acceleration="auto", preset="fast", quality=22),
         default_format="long",
         default_lang="fr",
     )
