@@ -21,6 +21,10 @@ class LLMProvider(ABC):
     @abstractmethod
     def get_model_name(self) -> str: ...
 
+    def unload_model(self) -> None:
+        """Unload model from GPU memory to free VRAM. Optional - override if supported."""
+        pass
+
 
 class MockLLMProvider(LLMProvider):
     def __init__(self, config: LLMProviderConfig) -> None:
@@ -38,3 +42,7 @@ class MockLLMProvider(LLMProvider):
 
     def get_model_name(self) -> str:
         return f"mock/{self.config.model}"
+
+    def unload_model(self) -> None:
+        """Mock unload - no resources to clean up."""
+        pass

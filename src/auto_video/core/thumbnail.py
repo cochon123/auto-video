@@ -88,3 +88,19 @@ class ThumbnailGenerator:
         except Exception as e:
             logger.error("Failed to generate image prompt: %s", str(e))
             raise
+
+    def cleanup(self) -> None:
+        """Cleanup LLM resources and free GPU VRAM."""
+        try:
+            if self._llm:
+                self._llm.cleanup()
+                logger.info("Cleaned up ThumbnailGenerator LLM resources")
+        except Exception as e:
+            logger.warning(f"Error during ThumbnailGenerator cleanup: {str(e)}")
+
+    def __del__(self) -> None:
+        """Cleanup on garbage collection."""
+        try:
+            self.cleanup()
+        except Exception:
+            pass  # Ignore errors during garbage collection

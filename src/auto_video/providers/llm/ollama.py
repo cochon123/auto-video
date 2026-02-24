@@ -180,3 +180,32 @@ class OllamaProvider(LLMProvider):
 
     def get_model_name(self) -> str:
         return f"ollama/{self._model}"
+
+    def unload_model(self) -> None:
+        """Unload model from GPU memory to free VRAM."""
+        try:
+            endpoint = f"{self._base_url}/api/generate"
+            payload = {
+                "model": self._model,
+                "prompt": "",
+                "keep_alive": 0,  # Unload immediately
+                "stream": False,
+                "options": {
+                    "num_keep": 0,  # Don't keep any tokens
+                    "num_ctx": 0,  # Minimal context
+                },
+            }
+
+            with httpx.Client(timeout=10.0) as client:
+                response = client.post(endpoint, json=payload)
+                response.raise_for_status()
+
+            logger.info(f"Ollama model unloaded from GPU: {self._model}")
+        except httpx.ConnectError as e:
+            logger.warning(f"Failed to unload Ollama model (connection error): {str(e)}")
+        except httpx.HTTPStatusError as e:
+            logger.warning(
+                f"Failed to unload Ollama model (HTTP {e.response.status_code}): {str(e)}"
+            )
+        except Exception as e:
+            logger.warning(f"Failed to unload Ollama model: {str(e)}")

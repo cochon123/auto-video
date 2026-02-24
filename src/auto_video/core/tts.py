@@ -21,6 +21,11 @@ class TTSProvider(ABC):
     @abstractmethod
     def get_available_voices(self) -> list[str]: ...
 
+    def cleanup(self) -> None:
+        """Cleanup TTS resources and free GPU VRAM."""
+        # Subclasses should override this if needed
+        pass
+
 
 class MockTTSProvider(TTSProvider):
     def __init__(self, config: TTSConfig) -> None:
@@ -38,6 +43,10 @@ class MockTTSProvider(TTSProvider):
 
     def get_available_voices(self) -> list[str]:
         return ["default", "male", "female"]
+
+    def cleanup(self) -> None:
+        """Cleanup mock TTS resources."""
+        pass
 
 
 class TTS:

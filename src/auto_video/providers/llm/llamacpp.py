@@ -132,3 +132,29 @@ class LlamaCppProvider(LLMProvider):
 
     def get_model_name(self) -> str:
         return f"llamacpp/{self._model}"
+
+    def unload_model(self) -> None:
+        """Unload model from GPU memory to free VRAM."""
+        try:
+            # Llama.cpp server doesn't have a direct unload endpoint,
+            # but we can try to send a completion with minimal context
+            endpoint = f"{self._base_url}/completion"
+            payload = {
+                "prompt": "",
+                "n_predict": 0,
+                "stream": False,
+            }
+
+            with httpx.Client(timeout=10.0) as client:
+                response = client.post(endpoint, json=payload)
+                response.raise_for_status()
+
+            logger.info(f"Llama.cpp model context cleared: {self._model}")
+        except httpx.ConnectError as e:
+            logger.warning(f"Failed to clear Llama.cpp model context (connection error): {str(e)}")
+        except httpx.HTTPStatusError as e:
+            logger.warning(
+                f"Failed to clear Llama.cpp model context (HTTP {e.response.status_code}): {str(e)}"
+            )
+        except Exception as e:
+            logger.warning(f"Failed to clear Llama.cpp model context: {str(e)}")

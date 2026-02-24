@@ -2,10 +2,14 @@
 
 import logging
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from auto_video.config.schema import VisualsConfig
 from auto_video.core.video import StockProvider, VideoResult
 from auto_video.providers.stock.base import MockStockProvider
+
+if TYPE_CHECKING:
+    from auto_video.core.visual_keywords import SegmentInfo
 
 logger = logging.getLogger(__name__)
 
@@ -35,22 +39,27 @@ class StockManager:
 
     def get_clips_for_segments(
         self,
-        segments_with_keywords: list[tuple[str, list[str]]],
+        segments: "list[SegmentInfo]",
         output_dir: Path,
     ) -> list[Path]:
-        """Get clips for each segment with specific keywords.
+        """Get clips for each segment with specific keywords and duration.
+
+        Each segment gets exactly one clip matching its estimated duration.
 
         Args:
-            segments_with_keywords: List of (segment_text, keywords) tuples.
+            segments: List of SegmentInfo with text, keywords, and duration.
             output_dir: Directory to save downloaded clips.
 
         Returns:
-            List of paths to downloaded video clips.
+            List of paths to downloaded video clips (one clip per segment).
         """
         clips: list[Path] = []
         clip_index = 0
 
-        for segment, keywords in segments_with_keywords:
+        for segment_info in segments:
+            keywords = segment_info.keywords
+            duration = segment_info.duration
+
             if not keywords:
                 keywords = ["nature", "technology", "abstract"]
 
@@ -69,25 +78,32 @@ class StockManager:
                 all_results: list[tuple[StockProvider, VideoResult]] = []
                 for provider in self._providers:
                     try:
-                        results = provider.search_videos(query, duration_min=5)
+                        duration_min = max(2, int(duration) - 2)
+                        results = provider.search_videos(query, duration_min=duration_min)
                         all_results.extend([(provider, r) for r in results])
                     except Exception:
                         continue
 
                 if not all_results:
-                    logger.warning("No results for segment: %s", segment[:50])
+                    logger.warning(
+                        "No results for segment: %s (duration: %.2fs)",
+                        segment_info.text[:50],
+                        duration,
+                    )
                     continue
 
-                provider, video_result = all_results[0]
+                provider, video_result = self._find_best_matching_clip(all_results, duration)
 
                 output_path = output_dir / f"clip_{clip_index:03d}.mp4"
                 downloaded = provider.download_video(video_result.id, output_path, "medium")
                 clips.append(downloaded)
                 clip_index += 1
                 logger.debug(
-                    "Downloaded clip for segment %d: %s",
+                    "Downloaded clip %d: %s (%.2fs) for segment (%.2fs), keywords: %s",
                     clip_index,
-                    keywords,
+                    video_result.duration,
+                    duration,
+                    keywords[:2],
                 )
 
             except Exception as e:
@@ -95,11 +111,38 @@ class StockManager:
                 continue
 
         logger.info(
-            "StockManager: downloaded %d clips for %d segments",
+            "StockManager: downloaded %d clips for %d segments (one clip per segment)",
             len(clips),
-            len(segments_with_keywords),
+            len(segments),
         )
+
         return clips
+
+    def _find_best_matching_clip(
+        self, results: list[tuple[StockProvider, VideoResult]], target_duration: float
+    ) -> tuple[StockProvider, VideoResult]:
+        """Find the clip that best matches the target duration.
+
+        Args:
+            results: List of (provider, video_result) tuples.
+            target_duration: Desired clip duration in seconds.
+
+        Returns:
+            Tuple of (provider, video_result) for best matching clip.
+        """
+        if not results:
+            raise ValueError("No clips to choose from")
+
+        best_result = results[0]
+        best_diff = abs(best_result[1].duration - target_duration)
+
+        for provider, video_result in results[1:]:
+            diff = abs(video_result.duration - target_duration)
+            if diff < best_diff:
+                best_result = (provider, video_result)
+                best_diff = diff
+
+        return best_result
 
     def get_clips_for_script(
         self, script: str, keywords: list[str], total_duration: float, output_dir: Path

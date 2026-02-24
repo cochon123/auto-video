@@ -1,8 +1,11 @@
 """LLM core module."""
 
+import logging
 from pathlib import Path
 
 from auto_video.config.schema import LLMProviderConfig
+
+logger = logging.getLogger(__name__)
 from auto_video.core.provider_base import LLMProvider, MockLLMProvider
 from auto_video.providers.llm import create_provider
 
@@ -65,3 +68,28 @@ class LLM:
         prompt_template = load_prompt("image.txt")
         prompt = prompt_template.replace("{context}", context)
         return self._provider.generate(prompt)
+
+    def cleanup(self) -> None:
+        """Cleanup LLM resources and free GPU VRAM."""
+        try:
+            if self._provider and hasattr(self._provider, "unload_model"):
+                self._provider.unload_model()
+                logger.info(f"Cleaned up LLM resources: {self._provider.get_model_name()}")
+        except Exception as e:
+            logger.warning(f"Error during LLM cleanup: {str(e)}")
+
+    def __del__(self) -> None:
+        """Cleanup on garbage collection."""
+        try:
+            self.cleanup()
+        except Exception:
+            pass  # Ignore errors during garbage collection
+
+    def __enter__(self):
+        """Context manager entry."""
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit - ensure cleanup."""
+        self.cleanup()
+        return False

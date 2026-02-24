@@ -1,12 +1,45 @@
-"""Kokoro TTS provider implementation using kokoro-onnx."""
+"""
+Kokoro TTS provider with GPU acceleration support.
+
+GPU Requirements:
+- Install onnxruntime-gpu: pip install onnxruntime-gpu
+- CUDA drivers must be installed on your system (CUDA 12+ recommended)
+- cuDNN libraries must be available
+
+GPU Configuration:
+- Automatic: onnxruntime-gpu will auto-detect CUDA and use it if available
+- The provider automatically configures LD_LIBRARY_PATH for cuDNN if found at
+  /usr/local/lib/ollama/mlx_cuda_v13
+- Manual override: Set ONNX_PROVIDER=CUDAExecutionProvider environment variable
+- Check GPU status: Provider will log "GPU enabled (CUDAExecutionProvider)" or
+  "Using CPU only"
+
+Performance:
+- CPU: ~90x real-time speed (limited by CPU)
+- GPU: Significantly faster, especially for long texts
+- VRAM: Kokoro model is ~300MB, so works well with other GPU workloads
+
+Troubleshooting:
+- If GPU is not detected, check that cuDNN libraries are in LD_LIBRARY_PATH
+- On systems with CUDA 13.0, ensure cuDNN 9.x is available
+- The provider will automatically fall back to CPU if GPU is unavailable
+"""
 
 import logging
+import os
 from pathlib import Path
 
 from auto_video.config.schema import TTSConfig
 from auto_video.core.tts import TTSProvider
 
 logger = logging.getLogger(__name__)
+
+# Configure LD_LIBRARY_PATH for CUDA/cuDNN if available
+_cudnn_path = "/usr/local/lib/ollama/mlx_cuda_v13"
+if os.path.exists(_cudnn_path) and _cudnn_path not in os.environ.get("LD_LIBRARY_PATH", ""):
+    current_ld_path = os.environ.get("LD_LIBRARY_PATH", "")
+    os.environ["LD_LIBRARY_PATH"] = f"{_cudnn_path}:{current_ld_path}"
+    logger.info(f"Kokoro TTS: Added cuDNN path to LD_LIBRARY_PATH: {_cudnn_path}")
 
 KOKORO_AVAILABLE = False
 
@@ -24,6 +57,23 @@ class KokoroTTSProvider(TTSProvider):
         self._cache_dir = Path.home() / ".cache" / "auto-video" / "kokoro"
         self._cache_dir.mkdir(parents=True, exist_ok=True)
         self._model = None
+
+        # GPU Provider Configuration
+        self._onnx_providers = self._get_onnx_providers()
+
+        # Check for ONNX_PROVIDER environment variable override
+        env_provider = os.getenv("ONNX_PROVIDER")
+        if env_provider:
+            self._onnx_providers = [env_provider]
+            logger.info(f"Kokoro TTS: Using provider from ONNX_PROVIDER env var: {env_provider}")
+
+        self._gpu_enabled = "CUDAExecutionProvider" in self._onnx_providers
+
+        if self._gpu_enabled:
+            logger.info("Kokoro TTS: GPU enabled (CUDAExecutionProvider - default provider)")
+        else:
+            logger.info("Kokoro TTS: Using CPU only")
+
         self._available_voices = [
             "af_bella",
             "af_nicole",
@@ -39,6 +89,33 @@ class KokoroTTSProvider(TTSProvider):
         self._model_path = self._cache_dir / "kokoro-v1.0.onnx"
         self._voices_path = self._cache_dir / "voices.bin"
         self._initialize_model()
+
+    @staticmethod
+    def _get_onnx_providers() -> list[str]:
+        """Get available ONNX Runtime providers with CUDA as priority, excluding TensorRT."""
+        try:
+            import onnxruntime as rt  # type: ignore[import-not-found]
+
+            all_providers = rt.get_available_providers()
+
+            # Completely exclude TensorRT to avoid any errors/warnings
+            filtered_providers = [p for p in all_providers if "TensorrtExecutionProvider" not in p]
+
+            # Prioritize CUDA if available
+            prioritized_providers = []
+            cuda_provider = "CUDAExecutionProvider"
+
+            if cuda_provider in filtered_providers:
+                prioritized_providers.append(cuda_provider)
+                # Add remaining providers (except CUDA) to avoid duplicates
+                prioritized_providers.extend([p for p in filtered_providers if p != cuda_provider])
+            else:
+                # If CUDA not available, use filtered providers (without TensorRT)
+                prioritized_providers = filtered_providers
+
+            return prioritized_providers
+        except Exception:
+            return ["CPUExecutionProvider"]  # Fallback
 
     def _download_model(self) -> bool:
         """Download the Kokoro ONNX model and voices file."""
@@ -71,9 +148,19 @@ class KokoroTTSProvider(TTSProvider):
                 return
 
         try:
-            # Set the model and voices paths
-            self._model = Kokoro(str(self._model_path), str(self._voices_path))
-            logger.info("Kokoro model loaded successfully from cache")
+            # Create ONNX Runtime session with GPU providers
+            import onnxruntime as rt  # type: ignore[import-not-found]
+
+            session = rt.InferenceSession(
+                str(self._model_path),
+                providers=self._onnx_providers,
+            )
+
+            # Create Kokoro from custom session
+            self._model = Kokoro.from_session(session, str(self._voices_path))
+            logger.info(
+                f"Kokoro model loaded successfully from cache (providers: {self._onnx_providers})"
+            )
         except Exception as e:
             logger.error("Failed to load Kokoro model: %s", str(e))
             self._model = None
@@ -132,3 +219,17 @@ class KokoroTTSProvider(TTSProvider):
 
     def get_available_voices(self) -> list[str]:
         return self._available_voices
+
+    def cleanup(self) -> None:
+        """Unload Kokoro model and free GPU VRAM."""
+        if self._model is not None:
+            del self._model
+            self._model = None
+            logger.info("Kokoro TTS: Model unloaded, GPU VRAM freed")
+
+    def __del__(self) -> None:
+        """Cleanup on garbage collection."""
+        try:
+            self.cleanup()
+        except Exception:
+            pass

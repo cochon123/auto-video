@@ -1,5 +1,6 @@
 """Video core module."""
 
+import logging
 import random
 import subprocess
 import tempfile
@@ -9,6 +10,8 @@ from pathlib import Path
 from typing import Literal
 
 from auto_video.utils.gpu import GPUDetector
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -389,6 +392,57 @@ class VideoComposer:
             check=True,
             timeout=300,
         )
+
+    def trim_video_to_duration(
+        self, video_path: Path, output_path: Path, target_duration: float
+    ) -> None:
+        """Trim video to match target audio duration.
+
+        If video is longer than target_duration, cut it to match.
+        This ensures video length matches audio length for proper sync.
+
+        Args:
+            video_path: Path to input video file.
+            output_path: Path to save trimmed video.
+            target_duration: Target duration in seconds.
+        """
+        video_duration = self.get_duration(video_path)
+
+        if video_duration <= target_duration:
+            logger.info(
+                f"Video duration ({video_duration:.2f}s) "
+                f"matches or is shorter than audio ({target_duration:.2f}s), no trim needed"
+            )
+            if video_path != output_path:
+                import shutil
+
+                shutil.copy2(video_path, output_path)
+            return
+
+        logger.info(f"Trimming video from {video_duration:.2f}s to {target_duration:.2f}s")
+
+        subprocess.run(
+            [
+                self.ffmpeg_path,
+                "-y",
+                "-i",
+                str(video_path),
+                "-t",
+                str(target_duration),
+                "-c:v",
+                "copy",
+                "-c:a",
+                "copy",
+                "-avoid_negative_ts",
+                "make_zero",
+                str(output_path),
+            ],
+            capture_output=True,
+            check=True,
+            timeout=600,
+        )
+
+        logger.info(f"Video trimmed to {target_duration:.2f}s")
 
     def apply_format(self, video_path: Path, output: Path, format: str) -> None:
         output.parent.mkdir(parents=True, exist_ok=True)
