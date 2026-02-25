@@ -33,6 +33,19 @@ class VisualKeywordExtractor:
         Returns:
             List of SegmentInfo with text, keywords, and duration.
         """
+        logger.debug(
+            "[DEBUG] VisualKeywordExtractor.extract_keywords_per_segment: "
+            "script_type=%s, script_is_none=%s, script_len=%s, first_100_chars=%r",
+            type(script).__name__,
+            script is None,
+            len(script) if script is not None else "N/A",
+            script[:100] if script else None,
+        )
+        if script is None:
+            logger.warning(
+                "[DEBUG] VisualKeywordExtractor received None script! This should not happen."
+            )
+            script = ""
         segments = self._segment_script(script)
         results = []
 
@@ -93,6 +106,16 @@ class VisualKeywordExtractor:
         return estimated_seconds
 
     def _extract_keywords_for_segment(self, segment: str, full_script: str) -> list[str]:
+        logger.debug(
+            "[DEBUG] _extract_keywords_for_segment: full_script_type=%s, full_script_is_none=%s",
+            type(full_script).__name__,
+            full_script is None,
+        )
+        if full_script is None:
+            logger.warning(
+                "[DEBUG] _extract_keywords_for_segment received None full_script! Using empty string."
+            )
+            full_script = ""
         context = full_script[:1000] if len(full_script) > 1000 else full_script
 
         prompt = (
@@ -123,57 +146,44 @@ class VisualKeywordExtractor:
             raise
 
     def _segment_script(self, script: str) -> list[str]:
-        """Segment the script into individual parts.
+        """Segment the script by sentence boundaries.
 
         Args:
             script: The full script text.
 
         Returns:
-            List of script segments.
+            List of script segments (one sentence per segment).
         """
+        import re
+
         segments = []
         lines = script.split("\n")
-
-        current_segment = ""
 
         for line in lines:
             line = line.strip()
             if not line:
                 continue
 
+            # Scene markers like [Intro] become their own segments
             if line.startswith("[") and line.endswith("]"):
-                if current_segment:
-                    segments.append(current_segment.strip())
-                    current_segment = ""
-                current_segment = line
-            else:
-                if current_segment:
-                    current_segment += " " + line
-                else:
-                    current_segment = line
+                segments.append(line)
+                continue
 
-                if len(current_segment) > 100:
-                    segments.append(current_segment.strip())
-                    current_segment = ""
+            # Split by sentence boundaries: . ! ? followed by space or end of string
+            # Handles common sentence endings and respects abbreviations
+            sentences = re.split(r'(?<=[.!?])\s+(?=[A-Z])', line)
 
-        if current_segment:
-            segments.append(current_segment.strip())
-
-        if not segments:
-            sentences = script.replace(".", ".\n").split("\n")
-            current = ""
             for sentence in sentences:
                 sentence = sentence.strip()
-                if not sentence:
-                    continue
-                current += " " + sentence if current else sentence
-                if len(current) > 80:
-                    segments.append(current.strip())
-                    current = ""
-            if current:
-                segments.append(current.strip())
+                if sentence and len(sentence) > 1:
+                    segments.append(sentence)
 
-                return segments if segments else [script[:200]]
+        # Fallback: if no segments found, split by period as last resort
+        if not segments:
+            parts = script.split(". ")
+            segments = [s.strip() + "." for s in parts if s.strip()]
+
+        return segments if segments else [script[:200]]
 
     def cleanup(self) -> None:
         """Cleanup LLM resources and free GPU VRAM."""
