@@ -2,6 +2,7 @@
 
 import json
 import logging
+import traceback
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
@@ -371,7 +372,19 @@ class VideoPipeline:
         keywords: list[str] = []
         clips: list[Path] = []
 
+        logger.debug(
+            "[DEBUG] Script initialization: step_value=%d, script=%r, script_type=%s",
+            step_value,
+            script,
+            type(script).__name__,
+        )
+
         if step_value > 1:
+            logger.debug(
+                "[DEBUG] Reading script from file: path=%s, exists=%s",
+                workspace.script_path,
+                workspace.script_path.exists(),
+            )
             if not workspace.script_path.exists():
                 return PipelineResult(
                     video_id=video_id,
@@ -383,6 +396,13 @@ class VideoPipeline:
                     youtube_url=youtube_url,
                 )
             script = workspace.script_path.read_text(encoding="utf-8")
+            logger.debug(
+                "[DEBUG] Script read from file: path=%s, len=%d, type=%s, first_100_chars=%r",
+                workspace.script_path,
+                len(script) if script is not None else "N/A",
+                type(script).__name__,
+                script[:100] if script else None,
+            )
 
         if step_value > 2:
             audio_duration = self._get_audio_duration(workspace.audio_path)
@@ -535,6 +555,13 @@ class VideoPipeline:
                 ):
                     try:
                         logger.info("Using VisualKeywordExtractor for segment-based clips")
+                        logger.debug(
+                            "[DEBUG] Before VisualKeywordExtractor: script_type=%s, script_len=%s, script_is_none=%s, first_100_chars=%r",
+                            type(script).__name__,
+                            len(script) if script is not None else "N/A",
+                            script is None,
+                            script[:100] if script else None,
+                        )
                         keyword_extractor = VisualKeywordExtractor(self.config.visuals.visual_llm)
                         segments_with_keywords = keyword_extractor.extract_keywords_per_segment(
                             script
@@ -543,7 +570,7 @@ class VideoPipeline:
                         keyword_extractor.cleanup()
                         del keyword_extractor
                         clips = stock_manager.get_clips_for_segments(
-                            segments_with_keywords, clips_dir
+                            segments_with_keywords, clips_dir, global_keywords=keywords
                         )
 
                         if not clips and self.config.visuals.mode == "hybrid":
@@ -553,8 +580,14 @@ class VideoPipeline:
                             clips.extend(stock_clips)
                     except Exception as e:
                         logger.warning(
-                            "VisualKeywordExtractor failed: %s, falling back to global keywords",
+                            "VisualKeywordExtractor failed: %s, falling back to global keywords\n"
+                            "Traceback:\n%s\n"
+                            "Script state: type=%s, is_none=%s, len=%s",
                             str(e),
+                            traceback.format_exc(),
+                            type(script).__name__,
+                            script is None,
+                            len(script) if script is not None else "N/A",
                         )
                         if self.config.visuals.mode == "stock":
                             clips = stock_manager.get_clips_for_script(
@@ -1170,6 +1203,13 @@ class VideoPipeline:
                 ):
                     try:
                         logger.info("Using VisualKeywordExtractor for segment-based clips")
+                        logger.debug(
+                            "[DEBUG] Before VisualKeywordExtractor: script_type=%s, script_len=%s, script_is_none=%s, first_100_chars=%r",
+                            type(script).__name__,
+                            len(script) if script is not None else "N/A",
+                            script is None,
+                            script[:100] if script else None,
+                        )
                         keyword_extractor = VisualKeywordExtractor(self.config.visuals.visual_llm)
                         segments_with_keywords = keyword_extractor.extract_keywords_per_segment(
                             script
@@ -1178,7 +1218,7 @@ class VideoPipeline:
                         keyword_extractor.cleanup()
                         del keyword_extractor
                         clips = stock_manager.get_clips_for_segments(
-                            segments_with_keywords, clips_dir
+                            segments_with_keywords, clips_dir, global_keywords=keywords
                         )
 
                         if not clips and self.config.visuals.mode == "hybrid":
@@ -1188,8 +1228,14 @@ class VideoPipeline:
                             clips.extend(stock_clips)
                     except Exception as e:
                         logger.warning(
-                            "VisualKeywordExtractor failed: %s, falling back to global keywords",
+                            "VisualKeywordExtractor failed: %s, falling back to global keywords\n"
+                            "Traceback:\n%s\n"
+                            "Script state: type=%s, is_none=%s, len=%s",
                             str(e),
+                            traceback.format_exc(),
+                            type(script).__name__,
+                            script is None,
+                            len(script) if script is not None else "N/A",
                         )
                         if self.config.visuals.mode == "stock":
                             clips = stock_manager.get_clips_for_script(

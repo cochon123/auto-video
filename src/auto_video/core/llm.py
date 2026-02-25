@@ -28,9 +28,12 @@ class LLM:
     def __init__(self, config: LLMProviderConfig) -> None:
         self.config = config
         self._provider = self._create_provider()
+        logger.info("[LLM] Initialized with provider: %s", self._provider.__class__.__name__)
 
     def _create_provider(self) -> LLMProvider:
-        return create_provider(self.config)
+        provider = create_provider(self.config)
+        logger.debug("[LLM] Created provider: %s", provider.__class__.__name__)
+        return provider
 
     @property
     def provider(self) -> LLMProvider:
@@ -38,6 +41,13 @@ class LLM:
 
     def generate_script(self, title: str | None, duration: int, lang: str) -> str:
         prompt_type = "targeted" if title else "general"
+        logger.info(
+            "[LLM] Generating script: type=%s, title=%r, duration=%d, lang=%s",
+            prompt_type,
+            title,
+            duration,
+            lang,
+        )
         prompt_template = load_prompt(f"{prompt_type}.txt")
         variables = {
             "title": title or "",
@@ -47,9 +57,13 @@ class LLM:
         prompt = prompt_template
         for key, value in variables.items():
             prompt = prompt.replace(f"{{{key}}}", value)
-        return self._provider.generate(prompt)
+        logger.debug("[LLM] Prompt length: %d chars", len(prompt))
+        result = self._provider.generate(prompt)
+        logger.info("[LLM] ✓ Script generated: %d chars", len(result))
+        return result
 
     def extract_keywords(self, text: str) -> list[str]:
+        logger.debug("[LLM] Extracting keywords from text: %d chars", len(text))
         prompt = (
             "Extract the main keywords from the following text. "
             f"Return ONLY a comma-separated list of keywords with no formatting:\n\n{text}"
@@ -62,6 +76,7 @@ class LLM:
             response = "\n".join(response.split("\n")).replace("*", "").replace("-", "")
         response = response.replace("\n", ",")
         keywords = [kw.strip() for kw in response.split(",") if kw.strip()]
+        logger.debug("[LLM] Extracted keywords: %s", keywords)
         return keywords[:10] if keywords else ["nature", "technology", "business"]
 
     def generate_image_prompt(self, context: str) -> str:
@@ -74,9 +89,9 @@ class LLM:
         try:
             if self._provider and hasattr(self._provider, "unload_model"):
                 self._provider.unload_model()
-                logger.info(f"Cleaned up LLM resources: {self._provider.get_model_name()}")
+                logger.info("[LLM] Cleaned up LLM resources: %s", self._provider.get_model_name())
         except Exception as e:
-            logger.warning(f"Error during LLM cleanup: {str(e)}")
+            logger.warning("[LLM] Error during LLM cleanup: %s", str(e))
 
     def __del__(self) -> None:
         """Cleanup on garbage collection."""

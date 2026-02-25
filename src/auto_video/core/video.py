@@ -308,14 +308,30 @@ class VideoComposer:
         temp_dir = output.parent / "temp_concat"
         temp_dir.mkdir(exist_ok=True)
 
+        logger.info(
+            "[VideoComposer] Concatenating %d clips to %s (target_duration=%.2fs)",
+            len(clips),
+            output.name,
+            target_duration,
+        )
+
         total_duration = 0.0
         normalized_clips: list[Path] = []
 
-        for clip_path in clips:
+        for i, clip_path in enumerate(clips):
             clip_duration = self.get_duration(clip_path)
             remaining = target_duration - total_duration
 
+            logger.debug(
+                "[VideoComposer] Processing clip %d: %s (%.2fs), remaining: %.2fs",
+                i + 1,
+                clip_path.name,
+                clip_duration,
+                remaining,
+            )
+
             if remaining <= 0:
+                logger.debug("[VideoComposer] Target duration reached, stopping")
                 break
 
             if clip_duration <= remaining:
@@ -323,6 +339,7 @@ class VideoComposer:
                 self._normalize_clip(clip_path, normalized_clip)
                 normalized_clips.append(normalized_clip)
                 total_duration += clip_duration
+                logger.debug("[VideoComposer] Added full clip: %.2fs (total: %.2fs)", clip_duration, total_duration)
             elif remaining > 0:
                 temp_clip = temp_dir / f"temp_{clip_path.stem}.mp4"
                 self._trim_clip(clip_path, temp_clip, remaining)
@@ -330,15 +347,23 @@ class VideoComposer:
                 self._normalize_clip(temp_clip, normalized_clip)
                 normalized_clips.append(normalized_clip)
                 total_duration += remaining
+                logger.debug("[VideoComposer] Added trimmed clip: %.2fs (total: %.2fs)", remaining, total_duration)
 
             if total_duration >= target_duration:
                 break
+
+        logger.info(
+            "[VideoComposer] Concatenating %d normalized clips (total_duration=%.2fs)",
+            len(normalized_clips),
+            total_duration,
+        )
 
         manifest_path = temp_dir / "concat_manifest.txt"
         with manifest_path.open("w") as f:
             for clip in normalized_clips:
                 f.write(f"file '{clip.absolute()}'\n")
 
+        logger.debug("[VideoComposer] Running ffmpeg concat...")
         subprocess.run(
             [
                 self.ffmpeg_path,
@@ -365,9 +390,17 @@ class VideoComposer:
             check=True,
             timeout=600,
         )
+        logger.info("[VideoComposer] ✓ Concatenation complete: %s", output)
 
     def add_audio(self, video_path: Path, audio_path: Path, output: Path) -> None:
         output.parent.mkdir(parents=True, exist_ok=True)
+
+        logger.info(
+            "[VideoComposer] Adding audio to video: video=%s, audio=%s, output=%s",
+            video_path.name,
+            audio_path.name,
+            output.name,
+        )
 
         subprocess.run(
             [
@@ -393,6 +426,8 @@ class VideoComposer:
             timeout=300,
         )
 
+        logger.info("[VideoComposer] ✓ Audio added successfully")
+
     def trim_video_to_duration(
         self, video_path: Path, output_path: Path, target_duration: float
     ) -> None:
@@ -410,8 +445,9 @@ class VideoComposer:
 
         if video_duration <= target_duration:
             logger.info(
-                f"Video duration ({video_duration:.2f}s) "
-                f"matches or is shorter than audio ({target_duration:.2f}s), no trim needed"
+                "[VideoComposer] Video duration (%.2fs) matches or is shorter than audio (%.2fs), no trim needed",
+                video_duration,
+                target_duration,
             )
             if video_path != output_path:
                 import shutil
@@ -419,7 +455,7 @@ class VideoComposer:
                 shutil.copy2(video_path, output_path)
             return
 
-        logger.info(f"Trimming video from {video_duration:.2f}s to {target_duration:.2f}s")
+        logger.info("[VideoComposer] Trimming video from %.2fs to %.2fs", video_duration, target_duration)
 
         subprocess.run(
             [
@@ -442,7 +478,7 @@ class VideoComposer:
             timeout=600,
         )
 
-        logger.info(f"Video trimmed to {target_duration:.2f}s")
+        logger.info("[VideoComposer] ✓ Video trimmed to %.2fs", target_duration)
 
     def apply_format(self, video_path: Path, output: Path, format: str) -> None:
         output.parent.mkdir(parents=True, exist_ok=True)

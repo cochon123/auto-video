@@ -37,20 +37,22 @@ class SubtitleGenerator:
 
     def _check_model_available(self) -> None:
         """Check for whisper.cpp CLI, whisper-gael CLI, Whisper C++, or fallback to Whisper Python."""
+        logger.debug("[Subtitle] Checking for available Whisper backends...")
+
         # Priority 1: Check for whisper.cpp CLI binary
         whisper_cpp_cli_path = (
             Path.home() / ".local" / "share" / "whisper.cpp" / "build" / "bin" / "whisper-cli"
         )
         if whisper_cpp_cli_path.exists() and whisper_cpp_cli_path.is_file():
             self._backend = "whisper_cpp_cli"
-            logger.info(f"Using whisper.cpp CLI binary: {whisper_cpp_cli_path}")
+            logger.info(f"[Subtitle] ✓ Using whisper.cpp CLI (GPU): {whisper_cpp_cli_path}")
             return
 
         # Priority 2: Check for whisper-gael CLI
         whisper_gael_path = shutil.which("whisper-gael.whisper")
         if whisper_gael_path:
             self._backend = "whisper_gael"
-            logger.info(f"Using whisper-gael CLI: {whisper_gael_path}")
+            logger.info(f"[Subtitle] ✓ Using whisper-gael CLI (CPU): {whisper_gael_path}")
             return
 
         # Priority 3: Check for Whisper C++ Python package
@@ -60,18 +62,19 @@ class SubtitleGenerator:
             whisper_cpp.WhisperCpp.from_pretrained(model_name_or_path=self.model)
 
             self._backend = "whisper_cpp"
-            logger.info(f"Whisper C++ model loaded: {self.model}")
+            logger.info(f"[Subtitle] ✓ Using Whisper C++ Python (CPU): model={self.model}")
         except Exception as e:
-            logger.warning(f"Whisper C++ not available: {e}")
-            logger.info("Falling back to Whisper Python")
+            logger.debug(f"[Subtitle] Whisper C++ not available: {e}")
+            logger.info("[Subtitle] Falling back to Whisper Python...")
             import importlib.util
 
             if importlib.util.find_spec("whisper"):
                 self._backend = "whisper"
-                logger.info(f"Whisper Python available: {self.model}")
+                logger.info(f"[Subtitle] ✓ Using Whisper Python (CPU, can use GPU if CUDA available): model={self.model}")
             else:
                 logger.error(
-                    "Neither whisper.cpp CLI, whisper-gael, Whisper C++ nor Whisper Python is available"
+                    "[Subtitle] ✗ No Whisper backend available! Install whisper.cpp CLI, whisper-gael, "
+                    "whisper-cpp, or openai-whisper"
                 )
                 raise ImportError(
                     "Install whisper.cpp CLI, whisper-gael snap: sudo snap install whisper-gael, "

@@ -34,7 +34,7 @@ class VisualKeywordExtractor:
             List of SegmentInfo with text, keywords, and duration.
         """
         logger.debug(
-            "[DEBUG] VisualKeywordExtractor.extract_keywords_per_segment: "
+            "[VisualKeywords] extract_keywords_per_segment: "
             "script_type=%s, script_is_none=%s, script_len=%s, first_100_chars=%r",
             type(script).__name__,
             script is None,
@@ -43,37 +43,42 @@ class VisualKeywordExtractor:
         )
         if script is None:
             logger.warning(
-                "[DEBUG] VisualKeywordExtractor received None script! This should not happen."
+                "[VisualKeywords] Received None script! Using empty string."
             )
             script = ""
+
+        logger.info("[VisualKeywords] Starting segmentation and keyword extraction...")
         segments = self._segment_script(script)
+        logger.info("[VisualKeywords] ✓ Segmented into %d segments", len(segments))
+
         results = []
 
-        logger.info("Extracting keywords and durations for %d segments", len(segments))
-
         for i, segment in enumerate(segments):
+            logger.debug("[VisualKeywords] Processing segment %d/%d: %r", i + 1, len(segments), segment[:80])
             try:
                 keywords = self._extract_keywords_for_segment(segment, script)
                 duration = self._estimate_segment_duration(segment)
                 results.append(SegmentInfo(text=segment, keywords=keywords, duration=duration))
                 logger.debug(
-                    "Segment %d: %s -> %s (%.2fs)",
+                    "[VisualKeywords] ✓ Segment %d: %s -> keywords=%s, duration=%.2fs",
                     i,
                     segment[:50],
                     keywords,
                     duration,
                 )
             except Exception as e:
-                logger.warning("Failed to extract keywords for segment %d: %s", i, str(e))
+                logger.warning("[VisualKeywords] Failed to extract keywords for segment %d: %s", i, str(e))
                 keywords = random.sample(
                     self._default_keywords, min(2, len(self._default_keywords))
                 )
                 duration = self._estimate_segment_duration(segment)
                 results.append(SegmentInfo(text=segment, keywords=keywords, duration=duration))
 
+        total_duration = sum(seg.duration for seg in results)
         logger.info(
-            "Total estimated duration from segments: %.2fs",
-            sum(seg.duration for seg in results),
+            "[VisualKeywords] ✓ Extraction complete: %d segments, total duration=%.2fs",
+            len(results),
+            total_duration,
         )
 
         return results
@@ -99,21 +104,34 @@ class VisualKeywordExtractor:
         maximum_duration = 30.0
 
         if estimated_seconds < minimum_duration:
+            logger.debug(
+                "[VisualKeywords] Duration %.2fs below minimum, padding to %.2fs (words=%d)",
+                estimated_seconds,
+                minimum_duration,
+                words,
+            )
             return minimum_duration
         if estimated_seconds > maximum_duration:
+            logger.debug(
+                "[VisualKeywords] Duration %.2fs above maximum, capping at %.2fs (words=%d)",
+                estimated_seconds,
+                maximum_duration,
+                words,
+            )
             return maximum_duration
 
         return estimated_seconds
 
     def _extract_keywords_for_segment(self, segment: str, full_script: str) -> list[str]:
         logger.debug(
-            "[DEBUG] _extract_keywords_for_segment: full_script_type=%s, full_script_is_none=%s",
+            "[VisualKeywords] extract_keywords: segment_len=%d, full_script_type=%s, full_script_is_none=%s",
+            len(segment),
             type(full_script).__name__,
             full_script is None,
         )
         if full_script is None:
             logger.warning(
-                "[DEBUG] _extract_keywords_for_segment received None full_script! Using empty string."
+                "[VisualKeywords] Received None full_script! Using empty string."
             )
             full_script = ""
         context = full_script[:1000] if len(full_script) > 1000 else full_script
@@ -129,6 +147,8 @@ class VisualKeywordExtractor:
             "Example output: nature, technology, office"
         )
 
+        logger.debug("[VisualKeywords] Sending prompt to LLM for segment: %r", segment[:60])
+
         try:
             response = self._llm.provider.generate(prompt)
             response = response.strip()
@@ -139,10 +159,12 @@ class VisualKeywordExtractor:
             response = response.replace("\n", ",")
             keywords = [k.strip() for k in response.split(",") if k.strip()]
 
+            logger.debug("[VisualKeywords] LLM response: %r -> keywords: %s", response[:100], keywords)
+
             return keywords[:3] if keywords else random.sample(self._default_keywords, 2)
 
         except Exception as e:
-            logger.error("LLM error: %s", str(e))
+            logger.error("[VisualKeywords] LLM error: %s", str(e))
             raise
 
     def _segment_script(self, script: str) -> list[str]:
@@ -156,6 +178,7 @@ class VisualKeywordExtractor:
         """
         import re
 
+        logger.debug("[VisualKeywords] Starting sentence-based segmentation...")
         segments = []
         lines = script.split("\n")
 
@@ -166,6 +189,7 @@ class VisualKeywordExtractor:
 
             # Scene markers like [Intro] become their own segments
             if line.startswith("[") and line.endswith("]"):
+                logger.debug("[VisualKeywords] Found scene marker: %r", line)
                 segments.append(line)
                 continue
 
@@ -176,12 +200,16 @@ class VisualKeywordExtractor:
             for sentence in sentences:
                 sentence = sentence.strip()
                 if sentence and len(sentence) > 1:
+                    logger.debug("[VisualKeywords] Extracted sentence: %r", sentence[:60])
                     segments.append(sentence)
 
         # Fallback: if no segments found, split by period as last resort
         if not segments:
+            logger.warning("[VisualKeywords] No segments found, using fallback period splitting")
             parts = script.split(". ")
             segments = [s.strip() + "." for s in parts if s.strip()]
+
+        logger.debug("[VisualKeywords] Segmentation complete: %d segments", len(segments))
 
         return segments if segments else [script[:200]]
 

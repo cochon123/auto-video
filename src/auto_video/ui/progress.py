@@ -282,18 +282,36 @@ class DevProgressDisplay:
         self.steps = steps
         self._current_step_index = -1
         self._commands: list[dict[str, str]] = []
+        # Force flush of any pending logs before printing step headers
+        import sys
+        import logging
+        self._sys_stdout = sys.stdout
+        self._logging_handlers = logging.getLogger().handlers
+
+    def _flush_logs(self) -> None:
+        """Flush any pending log output before printing."""
+        self._sys_stdout.flush()
+        # Also flush any logging handlers
+        for handler in self._logging_handlers:
+            if hasattr(handler, 'stream'):
+                handler.stream.flush()
 
     def start(self) -> None:
+        self._flush_logs()
         self.console.print("[bold cyan]🔧 MODE DÉVELOPPEMENT - Exécution du pipeline[/bold cyan]")
+        self.console.print("[dim]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/dim]")
         self.console.print()
 
     def stop(self) -> None:
+        self._flush_logs()
         self.console.print()
+        self.console.print("[dim]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/dim]")
         self.console.print("[bold green]✓ Pipeline terminé[/bold green]")
 
     def start_step(self, step_index: int, description: str = "") -> None:
         """Mark a step as running."""
         if 0 <= step_index < len(self.steps):
+            self._flush_logs()  # Flush logs before printing step header
             self._current_step_index = step_index
             self.console.print(
                 f"\n[bold yellow]▶ Étape {step_index + 1}/{len(self.steps)}: "
@@ -301,6 +319,7 @@ class DevProgressDisplay:
             )
             if description:
                 self.console.print(f"[dim]  {description}[/dim]")
+            self.console.print("[dim]  ─────────────────────────────────────────────────────────────[/dim]")
 
     def complete_step(self, step_index: int, details: str = "") -> None:
         """Mark a step as completed."""

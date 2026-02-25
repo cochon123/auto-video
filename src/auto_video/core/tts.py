@@ -1,9 +1,12 @@
 """TTS core module."""
 
+import logging
 from abc import ABC, abstractmethod
 from pathlib import Path
 
 from auto_video.config.schema import TTSConfig
+
+logger = logging.getLogger(__name__)
 
 __all__ = ["TTS", "TTSProvider", "MockTTSProvider"]
 
@@ -53,11 +56,14 @@ class TTS:
     def __init__(self, config: TTSConfig) -> None:
         self.config = config
         self._provider = self._create_provider()
+        logger.info("[TTS] Initialized with provider: %s", self._provider.__class__.__name__)
 
     def _create_provider(self) -> TTSProvider:
         from auto_video.providers.tts import create_provider
 
-        return create_provider(self.config)
+        provider = create_provider(self.config)
+        logger.debug("[TTS] Created provider: %s", provider.__class__.__name__)
+        return provider
 
     @property
     def provider(self) -> TTSProvider:
@@ -94,20 +100,35 @@ class TTS:
     def synthesize_script(self, script: str, output_path: Path) -> float:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         voice = self.config.voice or "default"
+
+        script_len = len(script)
+        word_count = len(script.split())
+        logger.info("[TTS] Synthesizing script: %d chars, %d words, voice=%s", script_len, word_count, voice)
+        logger.debug("[TTS] Script preview: %r", script[:100])
+
         segments = self._segment_text(script)
+        logger.info("[TTS] Script segmented into %d part(s)", len(segments))
+
         if len(segments) == 1:
-            return self._provider.synthesize(segments[0], output_path, voice)
+            logger.debug("[TTS] Single segment synthesis")
+            duration = self._provider.synthesize(segments[0], output_path, voice)
+            logger.info("[TTS] ✓ Synthesis complete: duration=%.2fs", duration)
+            return duration
+
         total_duration = 0.0
         segment_paths: list[Path] = []
         for i, segment in enumerate(segments):
             segment_path = output_path.parent / f"{output_path.stem}_part{i}.wav"
+            logger.debug("[TTS] Synthesizing segment %d/%d: %d chars", i + 1, len(segments), len(segment))
             duration = self._provider.synthesize(segment, segment_path, voice)
             total_duration += duration
             segment_paths.append(segment_path)
+            logger.debug("[TTS] Segment %d complete: %.2fs", i + 1, duration)
 
         if segment_paths:
             import subprocess
 
+            logger.debug("[TTS] Combining %d audio segments with ffmpeg", len(segment_paths))
             manifest = output_path.parent / "audio_concat_manifest.txt"
             with manifest.open("w") as f:
                 for sp in segment_paths:
@@ -130,8 +151,15 @@ class TTS:
                 timeout=60,
             )
             if result.returncode != 0:
+                logger.error("[TTS] FFmpeg concatenation failed: %s", result.stderr.decode())
                 raise RuntimeError(f"Failed to combine audio segments: {result.stderr.decode()}")
 
+            logger.debug("[TTS] Cleaning up temporary segment files")
+            for sp in segment_paths:
+                sp.unlink(missing_ok=True)
+            manifest.unlink(missing_ok=True)
+
+        logger.info("[TTS] ✓ Multi-segment synthesis complete: total_duration=%.2fs", total_duration)
         return total_duration
 
     def get_available_voices(self) -> list[str]:
