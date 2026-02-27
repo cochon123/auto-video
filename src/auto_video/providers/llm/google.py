@@ -66,7 +66,7 @@ class GoogleProvider(LLMProvider):
         }
 
         try:
-            with httpx.Client(timeout=60.0) as client:
+            with httpx.Client(timeout=240.0) as client:
                 response = client.post(url, params=params, json=payload)
 
                 if response.status_code != 200:
@@ -116,7 +116,7 @@ class GoogleProvider(LLMProvider):
         }
 
         try:
-            with httpx.Client(timeout=60.0) as client:
+            with httpx.Client(timeout=240.0) as client:
                 response = client.post(url, params=params, json=payload)
 
                 if response.status_code != 200:

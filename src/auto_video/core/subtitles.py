@@ -15,8 +15,16 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
+class WordTimestamp:
+    word: str
+    start: float
+    end: float
+
+
+@dataclass
 class TranscriptionResult:
     segments: list[dict[str, float | str]]
+    words: list[WordTimestamp]
     text: str
 
 
@@ -120,23 +128,29 @@ class SubtitleGenerator:
                 language=None,
             )
 
-            segments = [
-                {
-                    "start": seg.start,
-                    "end": seg.end,
-                    "text": seg.text.strip(),
-                }
-                for seg in segments_data.segments
-                if seg.text.strip()
-            ]
+            segments = []
+            words = []
+
+            for seg in segments_data.segments:
+                if seg.text.strip():
+                    segments.append({
+                        "start": seg.start,
+                        "end": seg.end,
+                        "text": seg.text.strip(),
+                    })
+                    # Extract word timestamps if available
+                    if hasattr(seg, 'words') and seg.words:
+                        for w in seg.words:
+                            if hasattr(w, 'word') and hasattr(w, 'start') and hasattr(w, 'end'):
+                                words.append(WordTimestamp(word=w.word, start=w.start, end=w.end))
 
             full_text = " ".join(seg["text"] for seg in segments)
 
             logger.info(
-                f"Transcription complete: {len(segments)} segments, {len(full_text)} characters"
+                f"Transcription complete: {len(segments)} segments, {len(words)} word timestamps, {len(full_text)} characters"
             )
 
-            return TranscriptionResult(segments=segments, text=full_text)
+            return TranscriptionResult(segments=segments, words=words, text=full_text)
 
         except Exception as e:
             logger.error(f"Whisper C++ transcription failed: {e}")
@@ -152,7 +166,7 @@ class SubtitleGenerator:
 
         try:
             logger.info(
-                f"Transcribing {audio_path} with whisper.cpp CLI (model: {self.model}, GPU enabled)"
+                f"Transcribing {audio_path} with whisper.cpp CLI (model: {self.model}, GPU enabled by default)"
             )
 
             # Determine model file path
@@ -212,6 +226,8 @@ class SubtitleGenerator:
                 return hours * 3600 + minutes * 60 + seconds + int(millis_part) / 1000
 
             segments = []
+            words = []
+
             for seg in result_data.get("transcription", []):
                 text = seg.get("text", "").strip()
                 if text:
@@ -219,13 +235,31 @@ class SubtitleGenerator:
                     end = parse_timestamp(seg["timestamps"]["to"])
                     segments.append({"start": start, "end": end, "text": text})
 
+                    # Extract word timestamps if available
+                    if "words" in seg:
+                        for word_data in seg["words"]:
+                            word_text = word_data.get("word", "").strip()
+                            if word_text:
+                                # Word timestamps may be in different formats
+                                if "timestamps" in word_data:
+                                    word_start = parse_timestamp(word_data["timestamps"]["from"])
+                                    word_end = parse_timestamp(word_data["timestamps"]["to"])
+                                    words.append(WordTimestamp(word=word_text, start=word_start, end=word_end))
+                                elif "start" in word_data and "end" in word_data:
+                                    # Direct numeric timestamps
+                                    words.append(WordTimestamp(
+                                        word=word_text,
+                                        start=float(word_data["start"]),
+                                        end=float(word_data["end"])
+                                    ))
+
             full_text = " ".join(seg["text"] for seg in segments)
 
             logger.info(
-                f"Transcription complete: {len(segments)} segments, {len(full_text)} characters"
+                f"Transcription complete: {len(segments)} segments, {len(words)} word timestamps, {len(full_text)} characters"
             )
 
-            return TranscriptionResult(segments=segments, text=full_text)
+            return TranscriptionResult(segments=segments, words=words, text=full_text)
 
         except subprocess.TimeoutExpired:
             logger.error("Whisper.cpp CLI transcription timed out")
@@ -263,6 +297,8 @@ class SubtitleGenerator:
                         str(temp_path),
                         "--task",
                         "transcribe",
+                        "--word_timestamps",
+                        "True",
                         "--verbose",
                         "False",
                     ],
@@ -281,23 +317,35 @@ class SubtitleGenerator:
                 with json_file.open("r", encoding="utf-8") as f:
                     result_data = json.load(f)
 
-                segments = [
-                    {
-                        "start": seg["start"],
-                        "end": seg["end"],
-                        "text": seg["text"].strip(),
-                    }
-                    for seg in result_data.get("segments", [])
-                    if seg.get("text", "").strip()
-                ]
+                segments = []
+                words = []
+
+                for seg in result_data.get("segments", []):
+                    text = seg.get("text", "").strip()
+                    if text:
+                        segments.append({
+                            "start": seg["start"],
+                            "end": seg["end"],
+                            "text": text,
+                        })
+                        # Extract word timestamps if available
+                        if "words" in seg:
+                            for word_data in seg["words"]:
+                                word_text = word_data.get("word", "").strip()
+                                if word_text and "start" in word_data and "end" in word_data:
+                                    words.append(WordTimestamp(
+                                        word=word_text,
+                                        start=float(word_data["start"]),
+                                        end=float(word_data["end"])
+                                    ))
 
                 full_text = " ".join(seg["text"] for seg in segments)
 
                 logger.info(
-                    f"Transcription complete: {len(segments)} segments, {len(full_text)} characters"
+                    f"Transcription complete: {len(segments)} segments, {len(words)} word timestamps, {len(full_text)} characters"
                 )
 
-                return TranscriptionResult(segments=segments, text=full_text)
+                return TranscriptionResult(segments=segments, words=words, text=full_text)
 
         except subprocess.TimeoutExpired:
             logger.error("Whisper-gael transcription timed out")
@@ -322,19 +370,28 @@ class SubtitleGenerator:
             whisper_model = whisper.load_model(self.model)
             result = whisper_model.transcribe(str(audio_path), word_timestamps=True)
 
-            segments = [
-                {"start": seg["start"], "end": seg["end"], "text": seg["text"].strip()}
-                for seg in result["segments"]
-                if seg["text"].strip()
-            ]
+            segments = []
+            words = []
+
+            for seg in result["segments"]:
+                if seg["text"].strip():
+                    segments.append({"start": seg["start"], "end": seg["end"], "text": seg["text"].strip()})
+                    # Extract word timestamps if available
+                    if 'words' in seg and seg['words']:
+                        for w in seg['words']:
+                            words.append(WordTimestamp(
+                                word=w['word'],
+                                start=w['start'],
+                                end=w['end']
+                            ))
 
             full_text = " ".join(seg["text"] for seg in segments)
 
             logger.info(
-                f"Transcription complete: {len(segments)} segments, {len(full_text)} characters"
+                f"Transcription complete: {len(segments)} segments, {len(words)} word timestamps, {len(full_text)} characters"
             )
 
-            return TranscriptionResult(segments=segments, text=full_text)
+            return TranscriptionResult(segments=segments, words=words, text=full_text)
 
         except Exception as e:
             logger.error(f"Whisper Python transcription failed: {e}")
@@ -382,6 +439,7 @@ class SubtitleGenerator:
 
             segments = []
             segment_durations = []
+            words = []
 
             for seg in segments_data.segments:
                 if seg.text.strip():
@@ -393,6 +451,12 @@ class SubtitleGenerator:
                     segments.append({"start": start, "end": end, "text": text})
                     segment_durations.append(duration)
 
+                    # Extract word timestamps if available
+                    if hasattr(seg, 'words') and seg.words:
+                        for w in seg.words:
+                            if hasattr(w, 'word') and hasattr(w, 'start') and hasattr(w, 'end'):
+                                words.append(WordTimestamp(word=w.word, start=w.start, end=w.end))
+
                     logger.debug(
                         f"Segment: [{start:.2f} - {end:.2f}] ({duration:.2f}s): {text[:50]}..."
                     )
@@ -400,11 +464,11 @@ class SubtitleGenerator:
             full_text = " ".join(seg["text"] for seg in segments)
 
             logger.info(
-                f"Transcription complete: {len(segments)} segments, "
+                f"Transcription complete: {len(segments)} segments, {len(words)} word timestamps, "
                 f"{len(full_text)} characters, total: {sum(segment_durations):.2f}s"
             )
 
-            return TranscriptionResult(segments=segments, text=full_text), segment_durations
+            return TranscriptionResult(segments=segments, words=words, text=full_text), segment_durations
 
         except Exception as e:
             logger.error(f"Whisper C++ transcription failed: {e}")
@@ -422,7 +486,7 @@ class SubtitleGenerator:
 
         try:
             logger.info(
-                f"Transcribing {audio_path} with whisper.cpp CLI (model: {self.model}, GPU enabled) with timing"
+                f"Transcribing {audio_path} with whisper.cpp CLI (model: {self.model}, GPU enabled by default) with timing"
             )
 
             # Determine model file path
@@ -483,6 +547,7 @@ class SubtitleGenerator:
 
             segments = []
             segment_durations = []
+            words = []
 
             for seg in result_data.get("transcription", []):
                 text = seg.get("text", "").strip()
@@ -494,6 +559,24 @@ class SubtitleGenerator:
                     segments.append({"start": start, "end": end, "text": text})
                     segment_durations.append(duration)
 
+                    # Extract word timestamps if available
+                    if "words" in seg:
+                        for word_data in seg["words"]:
+                            word_text = word_data.get("word", "").strip()
+                            if word_text:
+                                # Word timestamps may be in different formats
+                                if "timestamps" in word_data:
+                                    word_start = parse_timestamp(word_data["timestamps"]["from"])
+                                    word_end = parse_timestamp(word_data["timestamps"]["to"])
+                                    words.append(WordTimestamp(word=word_text, start=word_start, end=word_end))
+                                elif "start" in word_data and "end" in word_data:
+                                    # Direct numeric timestamps
+                                    words.append(WordTimestamp(
+                                        word=word_text,
+                                        start=float(word_data["start"]),
+                                        end=float(word_data["end"])
+                                    ))
+
                     logger.debug(
                         f"Segment: [{start:.2f} - {end:.2f}] ({duration:.2f}s): {text[:50]}..."
                     )
@@ -501,11 +584,11 @@ class SubtitleGenerator:
             full_text = " ".join(seg["text"] for seg in segments)
 
             logger.info(
-                f"Transcription complete: {len(segments)} segments, "
+                f"Transcription complete: {len(segments)} segments, {len(words)} word timestamps, "
                 f"{len(full_text)} characters, total: {sum(segment_durations):.2f}s"
             )
 
-            return TranscriptionResult(segments=segments, text=full_text), segment_durations
+            return TranscriptionResult(segments=segments, words=words, text=full_text), segment_durations
 
         except subprocess.TimeoutExpired:
             logger.error("Whisper.cpp CLI transcription timed out")
@@ -568,6 +651,7 @@ class SubtitleGenerator:
 
                 segments = []
                 segment_durations = []
+                words = []
 
                 for seg in result_data.get("segments", []):
                     text = seg.get("text", "").strip()
@@ -579,6 +663,17 @@ class SubtitleGenerator:
                         segments.append({"start": start, "end": end, "text": text})
                         segment_durations.append(duration)
 
+                        # Extract word timestamps if available
+                        if "words" in seg:
+                            for word_data in seg["words"]:
+                                word_text = word_data.get("word", "").strip()
+                                if word_text and "start" in word_data and "end" in word_data:
+                                    words.append(WordTimestamp(
+                                        word=word_text,
+                                        start=float(word_data["start"]),
+                                        end=float(word_data["end"])
+                                    ))
+
                         logger.debug(
                             f"Segment: [{start:.2f} - {end:.2f}] ({duration:.2f}s): {text[:50]}..."
                         )
@@ -586,11 +681,11 @@ class SubtitleGenerator:
                 full_text = " ".join(seg["text"] for seg in segments)
 
                 logger.info(
-                    f"Transcription complete: {len(segments)} segments, "
+                    f"Transcription complete: {len(segments)} segments, {len(words)} word timestamps, "
                     f"{len(full_text)} characters, total: {sum(segment_durations):.2f}s"
                 )
 
-                return TranscriptionResult(segments=segments, text=full_text), segment_durations
+                return TranscriptionResult(segments=segments, words=words, text=full_text), segment_durations
 
         except subprocess.TimeoutExpired:
             logger.error("Whisper-gael transcription timed out")
@@ -621,6 +716,7 @@ class SubtitleGenerator:
 
             segments = []
             segment_durations = []
+            words = []
 
             for seg in result["segments"]:
                 if seg["text"].strip():
@@ -632,6 +728,15 @@ class SubtitleGenerator:
                     segments.append({"start": start, "end": end, "text": text})
                     segment_durations.append(duration)
 
+                    # Extract word timestamps if available
+                    if 'words' in seg and seg['words']:
+                        for w in seg['words']:
+                            words.append(WordTimestamp(
+                                word=w['word'],
+                                start=w['start'],
+                                end=w['end']
+                            ))
+
                     logger.debug(
                         f"Segment: [{start:.2f} - {end:.2f}] ({duration:.2f}s): {text[:50]}..."
                     )
@@ -639,11 +744,11 @@ class SubtitleGenerator:
             full_text = " ".join(seg["text"] for seg in segments)
 
             logger.info(
-                f"Transcription complete: {len(segments)} segments, "
+                f"Transcription complete: {len(segments)} segments, {len(words)} word timestamps, "
                 f"{len(full_text)} characters, total: {sum(segment_durations):.2f}s"
             )
 
-            return TranscriptionResult(segments=segments, text=full_text), segment_durations
+            return TranscriptionResult(segments=segments, words=words, text=full_text), segment_durations
 
         except Exception as e:
             logger.error(f"Whisper Python transcription failed: {e}")
@@ -664,10 +769,10 @@ class SubtitleGenerator:
             ]
 
             text: str = str(segments[0]["text"])
-            return TranscriptionResult(segments=segments, text=text), [duration]
+            return TranscriptionResult(segments=segments, words=[], text=text), [duration]
 
         except (subprocess.TimeoutExpired, FileNotFoundError):
-            return TranscriptionResult(segments=[], text=""), []
+            return TranscriptionResult(segments=[], words=[], text=""), []
 
     def _transcribe_ffmpeg(self, audio_path: Path) -> TranscriptionResult:
         """Fallback FFmpeg transcription (returns single segment)."""
@@ -697,10 +802,10 @@ class SubtitleGenerator:
             ]
 
             text: str = str(segments[0]["text"])
-            return TranscriptionResult(segments=segments, text=text)
+            return TranscriptionResult(segments=segments, words=[], text=text)
 
         except (subprocess.TimeoutExpired, FileNotFoundError):
-            return TranscriptionResult(segments=[], text="")
+            return TranscriptionResult(segments=[], words=[], text="")
 
     def _get_audio_duration(self, audio_path: Path) -> float:
         """Get audio file duration using ffprobe."""
@@ -827,4 +932,5 @@ __all__ = [
     "SubtitleGenerator",
     "SubtitleStyle",
     "TranscriptionResult",
+    "WordTimestamp",
 ]

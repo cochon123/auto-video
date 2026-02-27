@@ -213,6 +213,10 @@ def cmd_create(args: argparse.Namespace) -> int:
     from typing import Any
 
     from auto_video.ui.progress import DevProgressDisplay, PipelineProgressDisplay
+    from auto_video.utils.logging import setup_logging
+
+    # Initialize logging before any other operation
+    setup_logging(verbose=args.dev)
 
     console = Console()
     progress_display: Any = None
@@ -317,6 +321,11 @@ def cmd_create(args: argparse.Namespace) -> int:
 
 
 def cmd_resume(args: argparse.Namespace) -> int:
+    from auto_video.utils.logging import setup_logging
+
+    # Initialize logging before any other operation
+    setup_logging(verbose=False)
+
     console = Console()
 
     config_path = args.config if args.config else get_default_config_path()

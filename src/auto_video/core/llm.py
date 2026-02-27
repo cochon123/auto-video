@@ -1,6 +1,7 @@
 """LLM core module."""
 
 import logging
+import re
 from pathlib import Path
 
 from auto_video.config.schema import LLMProviderConfig
@@ -9,9 +10,57 @@ logger = logging.getLogger(__name__)
 from auto_video.core.provider_base import LLMProvider, MockLLMProvider
 from auto_video.providers.llm import create_provider
 
-__all__ = ["LLM", "LLMProvider", "MockLLMProvider", "load_prompt"]
+__all__ = ["LLM", "LLMProvider", "MockLLMProvider", "load_prompt", "clean_markdown"]
 
 PROMPTS_DIR = Path(__file__).parent.parent.parent.parent / "prompts"
+
+
+def clean_markdown(text: str) -> str:
+    """Remove markdown formatting from text for TTS.
+
+    Removes:
+    - Bold/italic markers (*, _, **, __)
+    - Headers (#, ##, etc.)
+    - Links ([text](url))
+    - Code blocks (` and ```)
+    - Bullet points (-, *, +)
+
+    Args:
+        text: Text with potential markdown formatting.
+
+    Returns:
+        Clean text suitable for text-to-speech.
+    """
+    # Remove headers (# ## ### etc.)
+    text = re.sub(r'^#{1,6}\s+', '', text, flags=re.MULTILINE)
+
+    # Remove bold/italic markers
+    text = re.sub(r'\*\*\*(.+?)\*\*\*', r'\1', text)  # ***bold italic***
+    text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)  # **bold**
+    text = re.sub(r'__(.+?)__', r'\1', text)  # __bold__
+    text = re.sub(r'\*(.+?)\*', r'\1', text)  # *italic*
+    text = re.sub(r'_(.+?)_', r'\1', text)  # _italic_
+    text = re.sub(r'~~(.+?)~~', r'\1', text)  # ~~strikethrough~~
+
+    # Remove links but keep text: [text](url) -> text
+    text = re.sub(r'\[(.+?)\]\(.+?\)', r'\1', text)
+
+    # Remove inline code: `code`
+    text = re.sub(r'`(.+?)`', r'\1', text)
+
+    # Remove code blocks
+    text = re.sub(r'```[\s\S]*?```', '', text)
+    text = re.sub(r'~~~[\s\S]*?~~~', '', text)
+
+    # Remove bullet points at line start (but keep the text)
+    text = re.sub(r'^[\s]*[-*+]\s+', '', text, flags=re.MULTILINE)
+    text = re.sub(r'^[\s]*\d+\.\s+', '', text, flags=re.MULTILINE)
+
+    # Clean up extra whitespace
+    text = re.sub(r'\n{3,}', '\n\n', text)  # Max 2 consecutive newlines
+    text = text.strip()
+
+    return text
 
 
 def load_prompt(filename: str, **variables: str) -> str:
@@ -59,7 +108,10 @@ class LLM:
             prompt = prompt.replace(f"{{{key}}}", value)
         logger.debug("[LLM] Prompt length: %d chars", len(prompt))
         result = self._provider.generate(prompt)
-        logger.info("[LLM] ✓ Script generated: %d chars", len(result))
+
+        # Clean markdown formatting for TTS
+        result = clean_markdown(result)
+        logger.info("[LLM] ✓ Script generated: %d chars (markdown cleaned)", len(result))
         return result
 
     def extract_keywords(self, text: str) -> list[str]:

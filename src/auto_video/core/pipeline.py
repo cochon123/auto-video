@@ -17,7 +17,8 @@ from auto_video.core.subtitles import SubtitleGenerator, SubtitleStyle
 from auto_video.core.thumbnail import ThumbnailGenerator
 from auto_video.core.tts import TTS
 from auto_video.core.video import LocalAssetsManager, VideoComposer
-from auto_video.core.visual_keywords import VisualKeywordExtractor
+from auto_video.core.visual_keywords import MediaSegment, VisualKeywordExtractor
+from auto_video.core.timing_aligner import TextToTimestampAligner
 from auto_video.providers.stock import StockManager
 from auto_video.upload.youtube import YouTubeUploader
 from auto_video.utils.security import (
@@ -554,24 +555,89 @@ class VideoPipeline:
                     "hybrid",
                 ):
                     try:
-                        logger.info("Using VisualKeywordExtractor for segment-based clips")
-                        logger.debug(
-                            "[DEBUG] Before VisualKeywordExtractor: script_type=%s, script_len=%s, script_is_none=%s, first_100_chars=%r",
-                            type(script).__name__,
-                            len(script) if script is not None else "N/A",
-                            script is None,
-                            script[:100] if script else None,
-                        )
-                        keyword_extractor = VisualKeywordExtractor(self.config.visuals.visual_llm)
-                        segments_with_keywords = keyword_extractor.extract_keywords_per_segment(
-                            script
-                        )
-                        # Cleanup VisualKeywordExtractor LLM to free VRAM
-                        keyword_extractor.cleanup()
-                        del keyword_extractor
-                        clips = stock_manager.get_clips_for_segments(
-                            segments_with_keywords, clips_dir, global_keywords=keywords
-                        )
+                        # Check if we should use the new structured output system
+                        use_structured = getattr(self.config.visuals, "structured_output", True)
+                        enable_images = getattr(self.config.visuals, "enable_images", True)
+
+                        if use_structured:
+                            logger.info("Using VisualKeywordExtractor with structured output (all-at-once)")
+                            logger.debug(
+                                "[DEBUG] Before VisualKeywordExtractor: script_type=%s, script_len=%s, script_is_none=%s, first_100_chars=%r",
+                                type(script).__name__,
+                                len(script) if script is not None else "N/A",
+                                script is None,
+                                script[:100] if script else None,
+                            )
+                            keyword_extractor = VisualKeywordExtractor(self.config.visuals.visual_llm, workspace)
+                            media_segments: list[MediaSegment] = keyword_extractor.extract_keywords_all_at_once(
+                                script
+                            )
+                            # Cleanup VisualKeywordExtractor LLM to free VRAM
+                            keyword_extractor.cleanup()
+                            del keyword_extractor
+
+                            # Adjust media types if images are disabled
+                            if not enable_images:
+                                for seg in media_segments:
+                                    seg.media_type = "video"
+
+                            # Use word-level timing for precise synchronization
+                            try:
+                                logger.info("[Timing] Getting word-level timestamps from audio...")
+                                subtitle_gen = SubtitleGenerator()
+                                transcription = subtitle_gen.transcribe(workspace.audio_path)
+
+                                if transcription.words:
+                                    logger.info(
+                                        "[Timing] Got %d word timestamps, aligning %d media segments...",
+                                        len(transcription.words),
+                                        len(media_segments),
+                                    )
+                                    aligner = TextToTimestampAligner(transcription.words)
+
+                                    for segment in media_segments:
+                                        timing = aligner.find_timing_for_text(segment.text)
+                                        segment.start_time = timing.start_time
+                                        segment.end_time = timing.end_time
+                                        segment.duration = timing.end_time - timing.start_time
+
+                                    logger.info(
+                                        "[Timing] ✓ Aligned %d segments with word-level timestamps",
+                                        len(media_segments),
+                                    )
+                                else:
+                                    logger.warning(
+                                        "[Timing] No word timestamps available, using estimated durations"
+                                    )
+                            except Exception as e:
+                                logger.warning(
+                                    "[Timing] Word-level alignment failed: %s, using estimated durations",
+                                    str(e),
+                                )
+
+                            clips = stock_manager.get_media_for_segments(
+                                media_segments, clips_dir, global_keywords=keywords
+                            )
+                        else:
+                            # Use the old segmented extraction (legacy)
+                            logger.info("Using VisualKeywordExtractor for segment-based clips (legacy mode)")
+                            logger.debug(
+                                "[DEBUG] Before VisualKeywordExtractor: script_type=%s, script_len=%s, script_is_none=%s, first_100_chars=%r",
+                                type(script).__name__,
+                                len(script) if script is not None else "N/A",
+                                script is None,
+                                script[:100] if script else None,
+                            )
+                            keyword_extractor = VisualKeywordExtractor(self.config.visuals.visual_llm, workspace)
+                            segments_with_keywords = keyword_extractor.extract_keywords_per_segment(
+                                script
+                            )
+                            # Cleanup VisualKeywordExtractor LLM to free VRAM
+                            keyword_extractor.cleanup()
+                            del keyword_extractor
+                            clips = stock_manager.get_clips_for_segments(
+                                segments_with_keywords, clips_dir, global_keywords=keywords
+                            )
 
                         if not clips and self.config.visuals.mode == "hybrid":
                             stock_clips = stock_manager.get_clips_for_script(
@@ -1202,24 +1268,89 @@ class VideoPipeline:
                     "hybrid",
                 ):
                     try:
-                        logger.info("Using VisualKeywordExtractor for segment-based clips")
-                        logger.debug(
-                            "[DEBUG] Before VisualKeywordExtractor: script_type=%s, script_len=%s, script_is_none=%s, first_100_chars=%r",
-                            type(script).__name__,
-                            len(script) if script is not None else "N/A",
-                            script is None,
-                            script[:100] if script else None,
-                        )
-                        keyword_extractor = VisualKeywordExtractor(self.config.visuals.visual_llm)
-                        segments_with_keywords = keyword_extractor.extract_keywords_per_segment(
-                            script
-                        )
-                        # Cleanup VisualKeywordExtractor LLM to free VRAM
-                        keyword_extractor.cleanup()
-                        del keyword_extractor
-                        clips = stock_manager.get_clips_for_segments(
-                            segments_with_keywords, clips_dir, global_keywords=keywords
-                        )
+                        # Check if we should use the new structured output system
+                        use_structured = getattr(self.config.visuals, "structured_output", True)
+                        enable_images = getattr(self.config.visuals, "enable_images", True)
+
+                        if use_structured:
+                            logger.info("Using VisualKeywordExtractor with structured output (all-at-once)")
+                            logger.debug(
+                                "[DEBUG] Before VisualKeywordExtractor: script_type=%s, script_len=%s, script_is_none=%s, first_100_chars=%r",
+                                type(script).__name__,
+                                len(script) if script is not None else "N/A",
+                                script is None,
+                                script[:100] if script else None,
+                            )
+                            keyword_extractor = VisualKeywordExtractor(self.config.visuals.visual_llm, workspace)
+                            media_segments: list[MediaSegment] = keyword_extractor.extract_keywords_all_at_once(
+                                script
+                            )
+                            # Cleanup VisualKeywordExtractor LLM to free VRAM
+                            keyword_extractor.cleanup()
+                            del keyword_extractor
+
+                            # Adjust media types if images are disabled
+                            if not enable_images:
+                                for seg in media_segments:
+                                    seg.media_type = "video"
+
+                            # Use word-level timing for precise synchronization
+                            try:
+                                logger.info("[Timing] Getting word-level timestamps from audio...")
+                                subtitle_gen = SubtitleGenerator()
+                                transcription = subtitle_gen.transcribe(workspace.audio_path)
+
+                                if transcription.words:
+                                    logger.info(
+                                        "[Timing] Got %d word timestamps, aligning %d media segments...",
+                                        len(transcription.words),
+                                        len(media_segments),
+                                    )
+                                    aligner = TextToTimestampAligner(transcription.words)
+
+                                    for segment in media_segments:
+                                        timing = aligner.find_timing_for_text(segment.text)
+                                        segment.start_time = timing.start_time
+                                        segment.end_time = timing.end_time
+                                        segment.duration = timing.end_time - timing.start_time
+
+                                    logger.info(
+                                        "[Timing] ✓ Aligned %d segments with word-level timestamps",
+                                        len(media_segments),
+                                    )
+                                else:
+                                    logger.warning(
+                                        "[Timing] No word timestamps available, using estimated durations"
+                                    )
+                            except Exception as e:
+                                logger.warning(
+                                    "[Timing] Word-level alignment failed: %s, using estimated durations",
+                                    str(e),
+                                )
+
+                            clips = stock_manager.get_media_for_segments(
+                                media_segments, clips_dir, global_keywords=keywords
+                            )
+                        else:
+                            # Use the old segmented extraction (legacy)
+                            logger.info("Using VisualKeywordExtractor for segment-based clips (legacy mode)")
+                            logger.debug(
+                                "[DEBUG] Before VisualKeywordExtractor: script_type=%s, script_len=%s, script_is_none=%s, first_100_chars=%r",
+                                type(script).__name__,
+                                len(script) if script is not None else "N/A",
+                                script is None,
+                                script[:100] if script else None,
+                            )
+                            keyword_extractor = VisualKeywordExtractor(self.config.visuals.visual_llm, workspace)
+                            segments_with_keywords = keyword_extractor.extract_keywords_per_segment(
+                                script
+                            )
+                            # Cleanup VisualKeywordExtractor LLM to free VRAM
+                            keyword_extractor.cleanup()
+                            del keyword_extractor
+                            clips = stock_manager.get_clips_for_segments(
+                                segments_with_keywords, clips_dir, global_keywords=keywords
+                            )
 
                         if not clips and self.config.visuals.mode == "hybrid":
                             stock_clips = stock_manager.get_clips_for_script(

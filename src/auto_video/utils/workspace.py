@@ -74,6 +74,11 @@ class Workspace:
         """Get path for the pipeline state file."""
         return self.workspace_path / "state.json"
 
+    @property
+    def visual_keywords_debug_path(self) -> Path:
+        """Get path for the visual keywords JSON debug file."""
+        return self.workspace_path / "visual_keywords_raw.json"
+
     def create(self) -> None:
         self.workspace_path.mkdir(parents=True, exist_ok=True)
         self.workspace_path.chmod(0o755)

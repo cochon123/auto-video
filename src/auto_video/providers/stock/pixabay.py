@@ -8,7 +8,7 @@ from typing import Any
 import httpx
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
-from auto_video.core.video import StockProvider, VideoResult
+from auto_video.core.video import ImageResult, StockProvider, VideoResult
 
 logger = logging.getLogger(__name__)
 
@@ -192,3 +192,128 @@ class PixabayProvider(StockProvider):
         except Exception as e:
             logger.error("Pixabay health check failed: %s", str(e))
             return False
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_exception_type(httpx.HTTPStatusError),
+        reraise=True,
+    )
+    def search_images(self, query: str) -> list[ImageResult]:
+        """Search for photos on Pixabay.
+
+        Args:
+            query: Search query string.
+
+        Returns:
+            List of ImageResult objects.
+        """
+        url = self._base_url
+        params: dict[str, str | int] = {
+            "key": self._api_key,
+            "q": query,
+            "per_page": 15,
+            "image_type": "photo",
+            "orientation": "horizontal",
+            "safesearch": "true",
+        }
+
+        try:
+            response = self._http_client.get(url, params=params)
+            response.raise_for_status()
+
+            data = response.json()
+            images: list[ImageResult] = []
+
+            for item in data.get("hits", []):
+                # Use webformatURL or largeImageURL
+                image_url = (
+                    item.get("webformatURL")
+                    or item.get("largeImageURL")
+                    or item.get("fullHDURL")
+                )
+                if not image_url:
+                    continue
+
+                images.append(
+                    ImageResult(
+                        id=str(item["id"]),
+                        url=image_url,
+                        thumbnail=item.get("previewURL", image_url),
+                        width=item.get("imageWidth", 1920),
+                        height=item.get("imageHeight", 1080),
+                    )
+                )
+
+            logger.info("Pixabay image search: query='%s', found=%d images", query, len(images))
+            return images
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 429:
+                logger.warning("Pixabay rate limit exceeded, retrying...")
+                raise
+            logger.error("Pixabay API error: %s", str(e))
+            raise PixabayError(f"Pixabay API error: {e}")
+        except Exception as e:
+            logger.error("Pixabay image search failed: %s", str(e))
+            raise PixabayError(f"Pixabay image search failed: {e}")
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_exception_type(httpx.HTTPStatusError),
+        reraise=True,
+    )
+    def download_image(self, image_id: str, output_path: Path) -> Path:
+        """Download an image from Pixabay.
+
+        Args:
+            image_id: The Pixabay image ID.
+            output_path: Path where the image should be saved.
+
+        Returns:
+            Path to the downloaded image.
+        """
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        url = self._base_url
+        params: dict[str, str] = {"key": self._api_key, "id": image_id}
+
+        try:
+            response = self._http_client.get(url, params=params)
+            response.raise_for_status()
+
+            data = response.json()
+            hits = data.get("hits", [])
+            if not hits:
+                raise PixabayError(f"Image {image_id} not found")
+
+            item = hits[0]
+            image_url = (
+                item.get("webformatURL")
+                or item.get("largeImageURL")
+                or item.get("fullHDURL")
+            )
+
+            if not image_url:
+                raise PixabayError(f"No suitable image URL found for image {image_id}")
+
+            download_response = self._http_client.get(image_url, timeout=60.0)
+            download_response.raise_for_status()
+
+            output_path.write_bytes(download_response.content)
+
+            logger.info(
+                "Pixabay image download: image_id=%s, size=%d bytes",
+                image_id,
+                len(download_response.content),
+            )
+            return output_path
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 429:
+                logger.warning("Pixabay rate limit exceeded, retrying...")
+                raise
+            logger.error("Pixabay image download error: %s", str(e))
+            raise PixabayError(f"Pixabay image download error: {e}")
+        except Exception as e:
+            logger.error("Pixabay image download failed: %s", str(e))
+            raise PixabayError(f"Pixabay image download failed: {e}")

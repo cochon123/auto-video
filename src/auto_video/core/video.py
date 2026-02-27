@@ -23,12 +23,28 @@ class VideoResult:
     quality: str
 
 
+@dataclass
+class ImageResult:
+    """Result from searching stock images."""
+    id: str
+    url: str
+    thumbnail: str
+    width: int
+    height: int
+
+
 class StockProvider(ABC):
     @abstractmethod
     def search_videos(self, query: str, duration_min: int) -> list[VideoResult]: ...
 
     @abstractmethod
     def download_video(self, video_id: str, output_path: Path, quality: str) -> Path: ...
+
+    @abstractmethod
+    def search_images(self, query: str) -> list[ImageResult]: ...
+
+    @abstractmethod
+    def download_image(self, image_id: str, output_path: Path) -> Path: ...
 
     @abstractmethod
     def health_check(self) -> bool: ...

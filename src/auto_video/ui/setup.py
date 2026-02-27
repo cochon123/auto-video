@@ -321,8 +321,8 @@ class LLMSetupWizard:
             "openai": ["gpt-4o", "gpt-4-turbo", "gpt-3.5-turbo"],
             "anthropic": ["claude-3-opus", "claude-3-sonnet", "claude-3-haiku"],
             "groq": ["llama3.1-70b", "mixtral-8x7b", "gemma-7b"],
-            "google": ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.5-pro"],
-            "zhipuai": ["glm-4.5", "glm-4-flash", "glm-4-long", "glm-z1-air"],
+            "google": ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.5-pro", "gemma-3-27b-it"],
+            "zhipuai": ["glm-4.5", "glm-4-flash", "glm-4-long", "glm-z1-air", "glm-4.5-flash", "glm-4.7", "glm-4.7-flash", "glm-5"],
         }
 
         provider_models = models.get(provider, [])

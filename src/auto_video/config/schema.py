@@ -47,6 +47,10 @@ class VisualsConfig(BaseModel):
     pexels_api_key: str | None = None
     pixabay_api_key: str | None = None
     visual_llm: LLMProviderConfig | None = None
+    # New fields for enhanced visual system
+    enable_images: bool = True  # Allow using images in addition to videos
+    image_ratio: float = 0.3  # Target ratio of images to total media (0.0 = all videos, 1.0 = all images)
+    structured_output: bool = True  # Use structured JSON output from LLM for better parsing
 
 
 class StorageConfig(BaseModel):

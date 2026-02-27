@@ -10,8 +10,37 @@ from typing import Any
 from auto_video.core.pipeline import PipelineStep
 from auto_video.utils.workspace import Workspace
 
-LOG_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: [%(video_id)s] %(message)s"
+LOG_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+LOG_FORMAT_WITH_VIDEO = "%(asctime)s [%(levelname)s] %(name)s: [%(video_id)s] %(message)s"
 LOG_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
+
+
+class VideoAwareFormatter(logging.Formatter):
+    """Formatter that handles missing video_id gracefully."""
+
+    def __init__(self, fmt: str | None = None, datefmt: str | None = None, style: str = "%") -> None:
+        """Initialize the formatter.
+
+        Args:
+            fmt: Format string.
+            datefmt: Date format string.
+            style: Style of the format string (%, {, or $).
+        """
+        super().__init__(fmt, datefmt, style)
+
+    def format(self, record: logging.LogRecord) -> str:
+        """Format the log record, adding default video_id if missing.
+
+        Args:
+            record: The log record to format.
+
+        Returns:
+            The formatted log message.
+        """
+        # Add default video_id if not present
+        if not hasattr(record, "video_id"):
+            record.video_id = "N/A"
+        return super().format(record)
 
 
 class VideoLogger(logging.LoggerAdapter[logging.Logger]):
@@ -42,7 +71,7 @@ class VideoLogger(logging.LoggerAdapter[logging.Logger]):
             self.workspace.workspace_path.mkdir(parents=True, exist_ok=True)
 
             file_handler = logging.FileHandler(self.workspace.logs_path, mode="a", encoding="utf-8")
-            file_handler.setFormatter(logging.Formatter(LOG_FORMAT, LOG_DATE_FORMAT))
+            file_handler.setFormatter(VideoAwareFormatter(LOG_FORMAT_WITH_VIDEO, LOG_DATE_FORMAT))
             file_handler.setLevel(logging.DEBUG)
 
             self.logger.addHandler(file_handler)
@@ -117,7 +146,7 @@ def setup_logging(verbose: bool = False, log_file: Path | None = None) -> None:
 
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setLevel(logging.DEBUG if verbose else logging.INFO)
-    console_handler.setFormatter(logging.Formatter(LOG_FORMAT, LOG_DATE_FORMAT))
+    console_handler.setFormatter(VideoAwareFormatter(LOG_FORMAT, LOG_DATE_FORMAT))
     root_logger.addHandler(console_handler)
 
     if log_file is not None:
@@ -131,10 +160,12 @@ def setup_logging(verbose: bool = False, log_file: Path | None = None) -> None:
             encoding="utf-8",
         )
         file_handler.setLevel(logging.DEBUG)
-        file_handler.setFormatter(logging.Formatter(LOG_FORMAT, LOG_DATE_FORMAT))
+        file_handler.setFormatter(VideoAwareFormatter(LOG_FORMAT, LOG_DATE_FORMAT))
         root_logger.addHandler(file_handler)
 
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
     logging.getLogger("openai").setLevel(logging.WARNING)
     logging.getLogger("anthropic").setLevel(logging.WARNING)
+    logging.getLogger("onnxruntime").setLevel(logging.ERROR)
+    logging.getLogger("diffusers").setLevel(logging.WARNING)
