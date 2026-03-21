@@ -52,11 +52,15 @@ class PipelineProgressDisplay:
         )
 
     def start(self) -> None:
+        # Clear any existing content before starting Live display to prevent
+        # visual artifacts from previous terminal output
+        self.console.clear()
         self._live = Live(self._render(), console=self.console, transient=False)
         self._live.start()
 
     def stop(self) -> None:
         if self._live is not None:
+            # Use context manager to ensure proper cleanup
             self._live.stop()
             self._live = None
 
