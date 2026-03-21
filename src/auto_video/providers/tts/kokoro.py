@@ -39,7 +39,6 @@ _cudnn_path = "/usr/local/lib/ollama/mlx_cuda_v13"
 if os.path.exists(_cudnn_path) and _cudnn_path not in os.environ.get("LD_LIBRARY_PATH", ""):
     current_ld_path = os.environ.get("LD_LIBRARY_PATH", "")
     os.environ["LD_LIBRARY_PATH"] = f"{_cudnn_path}:{current_ld_path}"
-    logger.info(f"Kokoro TTS: Added cuDNN path to LD_LIBRARY_PATH: {_cudnn_path}")
 
 KOKORO_AVAILABLE = False
 
@@ -225,7 +224,6 @@ class KokoroTTSProvider(TTSProvider):
         if self._model is not None:
             del self._model
             self._model = None
-            logger.info("Kokoro TTS: Model unloaded, GPU VRAM freed")
 
     def __del__(self) -> None:
         """Cleanup on garbage collection."""
