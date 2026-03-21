@@ -25,6 +25,10 @@ class StepStatus:
 class PipelineProgressDisplay:
     """TUI for displaying pipeline progress with steps on left and details on right."""
 
+    # Refresh only called in explicit state transition methods (start_step, complete_step,
+    # fail_step) to prevent flooding Live with rapid updates that cause screen
+    # duplication. State setter methods (update_*) only update data without refresh.
+
     def __init__(self, steps: list[str]) -> None:
         self.console = Console()
         self.steps = steps
@@ -35,14 +39,12 @@ class PipelineProgressDisplay:
         self._live: Live | None = None
         self._current_step_index = -1
 
-        # Use separate console for Progress to avoid conflicts with Live display
-        self._progress_console = Console()
         self._progress_bar = Progress(
             TextColumn("[progress.description]{task.description}"),
             BarColumn(bar_width=None),
             TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
             TimeRemainingColumn(),
-            console=self._progress_console,
+            console=self.console,
             transient=False,
         )
         self._global_task = self._progress_bar.add_task(
@@ -50,9 +52,7 @@ class PipelineProgressDisplay:
         )
 
     def start(self) -> None:
-        self._live = Live(
-            self._render(), console=self.console, refresh_per_second=8, transient=False
-        )
+        self._live = Live(self._render(), console=self.console, transient=False)
         self._live.start()
 
     def stop(self) -> None:
@@ -88,19 +88,16 @@ class PipelineProgressDisplay:
         """Update the details of a running step."""
         if 0 <= step_index < len(self.step_statuses):
             self.step_statuses[step_index].details = details
-            self._refresh()
 
     def update_artifact_path(self, step_index: int, path: str) -> None:
         """Update the artifact path for a step."""
         if 0 <= step_index < len(self.step_statuses):
             self.step_statuses[step_index].artifact_path = path
-            self._refresh()
 
     def update_script_content(self, script: str) -> None:
         """Update the script content displayed in details."""
         if 0 <= len(self.step_statuses) > 0:
             self.step_statuses[0].script_content = script
-            self._refresh()
 
     def update_global_progress(self, progress: float) -> None:
         """Update the global progress percentage."""
@@ -285,8 +282,8 @@ class DevProgressDisplay:
         self._current_step_index = -1
         self._commands: list[dict[str, str]] = []
         # Force flush of any pending logs before printing step headers
-        import sys
         import logging
+        import sys
 
         self._sys_stdout = sys.stdout
         self._logging_handlers = logging.getLogger().handlers
