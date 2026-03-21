@@ -6,19 +6,13 @@ from collections.abc import Callable
 
 from rich.console import Console
 
-from auto_video.config.loader import (
-    get_default_config_path,
-    load_config,
-    save_config,
-)
-from auto_video.core.pipeline import PipelineStep, VideoPipeline
-from auto_video.ui.setup import SetupWizard
-
 CommandHandler = Callable[[argparse.Namespace], int]
 
 
 def cmd_setup() -> int:
     """Run the complete setup wizard (all wizards in sequence)."""
+    from auto_video.ui.setup import SetupWizard
+
     wizard = SetupWizard()
     config = wizard.run()
 
@@ -32,6 +26,7 @@ def cmd_setup() -> int:
 
 def cmd_setup_llm(args: argparse.Namespace) -> int:
     """Run only the LLM setup wizard."""
+    from auto_video.config.loader import get_default_config_path, load_config, save_config
     from auto_video.ui.setup import LLMSetupWizard
 
     console = Console()
@@ -64,6 +59,7 @@ def cmd_setup_llm(args: argparse.Namespace) -> int:
 
 def cmd_setup_storage(args: argparse.Namespace) -> int:
     """Run only the Storage setup wizard."""
+    from auto_video.config.loader import get_default_config_path, load_config, save_config
     from auto_video.ui.setup import StorageSetupWizard
 
     console = Console()
@@ -96,6 +92,7 @@ def cmd_setup_storage(args: argparse.Namespace) -> int:
 
 def cmd_setup_visuals(args: argparse.Namespace) -> int:
     """Run only the Visuals setup wizard."""
+    from auto_video.config.loader import get_default_config_path, load_config, save_config
     from auto_video.ui.setup import VisualsSetupWizard
 
     console = Console()
@@ -128,6 +125,7 @@ def cmd_setup_visuals(args: argparse.Namespace) -> int:
 
 def cmd_setup_tts(args: argparse.Namespace) -> int:
     """Run only the TTS and Images setup wizard."""
+    from auto_video.config.loader import get_default_config_path, load_config, save_config
     from auto_video.ui.setup import TTSImageSetupWizard
 
     console = Console()
@@ -179,6 +177,7 @@ def cmd_setup_prompts(args: argparse.Namespace) -> int:
 
 def cmd_setup_youtube(args: argparse.Namespace) -> int:
     """Run only the YouTube setup wizard."""
+    from auto_video.config.loader import get_default_config_path, load_config, save_config
     from auto_video.ui.setup import YouTubeSetupWizard
 
     console = Console()
@@ -212,6 +211,8 @@ def cmd_setup_youtube(args: argparse.Namespace) -> int:
 def cmd_create(args: argparse.Namespace) -> int:
     from typing import Any
 
+    from auto_video.config.loader import get_default_config_path, load_config
+    from auto_video.core.pipeline import VideoPipeline
     from auto_video.ui.progress import DevProgressDisplay, PipelineProgressDisplay
     from auto_video.utils.logging import setup_logging
 
@@ -321,6 +322,8 @@ def cmd_create(args: argparse.Namespace) -> int:
 
 
 def cmd_resume(args: argparse.Namespace) -> int:
+    from auto_video.config.loader import get_default_config_path, load_config
+    from auto_video.core.pipeline import PipelineStep, VideoPipeline
     from auto_video.utils.logging import setup_logging
 
     # Initialize logging before any other operation
@@ -404,6 +407,8 @@ def cmd_resume(args: argparse.Namespace) -> int:
 
 
 def cmd_config(args: argparse.Namespace) -> int:
+    from auto_video.config.loader import get_default_config_path, load_config
+
     console = Console()
 
     config_path = args.config if args.config else get_default_config_path()
@@ -506,6 +511,8 @@ def cmd_config_edit_section(args: argparse.Namespace) -> int:
     Returns:
         Exit code (0 for success, non-zero for failure).
     """
+    from auto_video.config.loader import get_default_config_path, load_config, save_config
+
     console = Console()
     config_path = args.config if args.config else get_default_config_path()
 
@@ -537,76 +544,76 @@ def cmd_config_edit_section(args: argparse.Namespace) -> int:
     elif section == "storage":
         from auto_video.ui.setup import StorageSetupWizard
 
-        wizard = StorageSetupWizard(console)
+        wizard = StorageSetupWizard(console)  # type: ignore[assignment]
         result = wizard.run()
 
         if not result.success or result.config is None:
             console.print("[yellow]Storage configuration cancelled.[/yellow]")
             return 1
 
-        config.storage = result.config
+        config.storage = result.config  # type: ignore[assignment]
         message = "Storage configuration updated"
 
     elif section == "visuals":
         from auto_video.ui.setup import VisualsSetupWizard
 
-        wizard = VisualsSetupWizard(console)
+        wizard = VisualsSetupWizard(console)  # type: ignore[assignment]
         result = wizard.run()
 
         if not result.success or result.config is None:
             console.print("[yellow]Visuals configuration cancelled.[/yellow]")
             return 1
 
-        config.visuals = result.config
+        config.visuals = result.config  # type: ignore[assignment]
         message = "Visuals configuration updated"
 
     elif section == "tts":
         from auto_video.ui.setup import TTSImageSetupWizard
 
-        wizard = TTSImageSetupWizard(console)
+        wizard = TTSImageSetupWizard(console)  # type: ignore[assignment]
         result = wizard.run()
 
-        if not result.success or result.tts_config is None:
+        if not result.success or result.tts_config is None:  # type: ignore[attr-defined]
             console.print("[yellow]TTS configuration cancelled.[/yellow]")
             return 1
 
-        config.tts = result.tts_config
-        if result.image_config:
-            config.image_gen = result.image_config
+        config.tts = result.tts_config  # type: ignore[attr-defined]
+        if result.image_config:  # type: ignore[attr-defined]
+            config.image_gen = result.image_config  # type: ignore[attr-defined]
         message = "TTS configuration updated"
 
     elif section == "image":
         from auto_video.ui.setup import TTSImageSetupWizard
 
-        wizard = TTSImageSetupWizard(console)
+        wizard = TTSImageSetupWizard(console)  # type: ignore[assignment]
         result = wizard.run()
 
-        if not result.success or result.image_config is None:
+        if not result.success or result.image_config is None:  # type: ignore[attr-defined]
             console.print("[yellow]Image generation configuration cancelled.[/yellow]")
             return 1
 
-        if result.tts_config:
-            config.tts = result.tts_config
-        config.image_gen = result.image_config
+        if result.tts_config:  # type: ignore[attr-defined]
+            config.tts = result.tts_config  # type: ignore[attr-defined]
+        config.image_gen = result.image_config  # type: ignore[attr-defined]
         message = "Image generation configuration updated"
 
     elif section == "youtube":
         from auto_video.ui.setup import YouTubeSetupWizard
 
-        wizard = YouTubeSetupWizard(console)
+        wizard = YouTubeSetupWizard(console)  # type: ignore[assignment]
         result = wizard.run()
 
         if not result.success or result.config is None:
             console.print("[yellow]YouTube configuration cancelled.[/yellow]")
             return 1
 
-        config.youtube = result.config
+        config.youtube = result.config  # type: ignore[assignment]
         message = "YouTube configuration updated"
 
     elif section == "prompts":
         from auto_video.ui.setup import PromptsSetupWizard
 
-        wizard = PromptsSetupWizard(console)
+        wizard = PromptsSetupWizard(console)  # type: ignore[assignment]
         result = wizard.run()
 
         if not result.success:
@@ -616,12 +623,12 @@ def cmd_config_edit_section(args: argparse.Namespace) -> int:
         prompts_path = config_path.parent / "prompts"
         prompts_path.mkdir(parents=True, exist_ok=True)
 
-        if result.general_prompt:
-            (prompts_path / "general.txt").write_text(result.general_prompt)
-        if result.targeted_prompt:
-            (prompts_path / "targeted.txt").write_text(result.targeted_prompt)
-        if result.image_prompt:
-            (prompts_path / "image.txt").write_text(result.image_prompt)
+        if result.general_prompt:  # type: ignore[attr-defined]
+            (prompts_path / "general.txt").write_text(result.general_prompt)  # type: ignore[attr-defined]
+        if result.targeted_prompt:  # type: ignore[attr-defined]
+            (prompts_path / "targeted.txt").write_text(result.targeted_prompt)  # type: ignore[attr-defined]
+        if result.image_prompt:  # type: ignore[attr-defined]
+            (prompts_path / "image.txt").write_text(result.image_prompt)  # type: ignore[attr-defined]
 
         message = "Prompts configuration updated"
 
@@ -767,7 +774,7 @@ def main() -> int:
             "  auto-video config --section storage    Edit storage paths using wizard\n"
             "  auto-video config --section visuals    Edit visuals settings using wizard\n"
             "  auto-video config --section tts         Edit TTS settings using wizard\n"
-            "  auto-video config --section image       Edit image generation settings using wizard\n"
+            "  auto-video config --section image       Edit image generation settings\n"
             "  auto-video config --section youtube    Edit YouTube settings using wizard\n"
             "  auto-video config --section prompts    Edit prompt templates using wizard\n"
         ),
@@ -783,7 +790,7 @@ def main() -> int:
         "--section",
         type=str,
         choices=["llm", "storage", "visuals", "tts", "image", "youtube", "prompts"],
-        help="Edit specific configuration section using interactive wizard (faster than full setup)",
+        help="Edit specific configuration section using interactive wizard",
     )
 
     models_parser = subparsers.add_parser("models", help="Manage AI models")
@@ -843,14 +850,14 @@ def main() -> int:
         "models": cmd_models,
     }
 
-    handler = command_map.get(args.command)
+    cmd_handler: CommandHandler | None = command_map.get(args.command)
 
-    if handler is None:
+    if cmd_handler is None:
         print(f"Unknown command: {args.command}", file=sys.stderr)
         return 1
 
     try:
-        return handler(args)
+        return cmd_handler(args)
     except KeyboardInterrupt:
         console = Console()
         console.print("\n[yellow]Operation cancelled by user.[/yellow]")
