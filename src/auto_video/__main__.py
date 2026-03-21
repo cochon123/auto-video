@@ -246,15 +246,16 @@ def cmd_create(args: argparse.Namespace) -> int:
     lang = args.lang or config.default_lang
     skip_upload = args.no_upload
 
-    console.print("[cyan]Starting video generation...[/cyan]")
-    console.print(f"  Title: {title or 'Auto-generated'}")
-    console.print(f"  Format: {video_format}")
-    console.print(f"  Language: {lang}")
-    console.print(f"  Duration: {args.duration if args.duration else 'default'}")
-    console.print(f"  Skip upload: {skip_upload}")
+    # Only print startup info in dev mode, TUI handles its own display
     if args.dev:
+        console.print("[cyan]Starting video generation...[/cyan]")
+        console.print(f"  Title: {title or 'Auto-generated'}")
+        console.print(f"  Format: {video_format}")
+        console.print(f"  Language: {lang}")
+        console.print(f"  Duration: {args.duration if args.duration else 'default'}")
+        console.print(f"  Skip upload: {skip_upload}")
         console.print("  Mode: dev (detailed output)")
-    console.print()
+        console.print()
 
     steps = [
         "1. Script",

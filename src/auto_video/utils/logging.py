@@ -7,6 +7,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from rich.logging import RichHandler
+
 from auto_video.core.pipeline import PipelineStep
 from auto_video.utils.workspace import Workspace
 
@@ -18,7 +20,9 @@ LOG_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 class VideoAwareFormatter(logging.Formatter):
     """Formatter that handles missing video_id gracefully."""
 
-    def __init__(self, fmt: str | None = None, datefmt: str | None = None, style: str = "%") -> None:
+    def __init__(
+        self, fmt: str | None = None, datefmt: str | None = None, style: str = "%"
+    ) -> None:
         """Initialize the formatter.
 
         Args:
@@ -133,7 +137,10 @@ class VideoLogger(logging.LoggerAdapter[logging.Logger]):
 
 
 def setup_logging(verbose: bool = False, log_file: Path | None = None) -> None:
-    """Configure logging for the auto-video application.
+    """Configure logging for auto-video application.
+
+    In dev mode (verbose=True), use standard StreamHandler for detailed output.
+    In normal mode (verbose=False), use RichHandler which integrates better with TUI.
 
     Args:
         verbose: If True, set level to DEBUG. Otherwise, INFO.
@@ -144,10 +151,25 @@ def setup_logging(verbose: bool = False, log_file: Path | None = None) -> None:
 
     root_logger.handlers.clear()
 
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setLevel(logging.DEBUG if verbose else logging.INFO)
-    console_handler.setFormatter(VideoAwareFormatter(LOG_FORMAT, LOG_DATE_FORMAT))
-    root_logger.addHandler(console_handler)
+    # In verbose (dev) mode, use StreamHandler for plain text output
+    # In normal mode, use RichHandler for better TUI integration
+    if verbose:
+        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler.setLevel(logging.DEBUG)
+        console_handler.setFormatter(VideoAwareFormatter(LOG_FORMAT, LOG_DATE_FORMAT))
+        root_logger.addHandler(console_handler)
+    else:
+        from rich.console import Console
+
+        # Use RichHandler in normal mode to prevent log interference with TUI
+        rich_handler = RichHandler(
+            console=Console(),
+            show_time=True,
+            show_path=False,
+            rich_tracebacks=True,
+        )
+        rich_handler.setLevel(logging.INFO)
+        root_logger.addHandler(rich_handler)
 
     if log_file is not None:
         log_file.parent.mkdir(parents=True, exist_ok=True)
