@@ -180,5 +180,13 @@ def setup_logging(verbose: bool = False, log_file: Path | None = None) -> None:
     logging.getLogger("httpcore").setLevel(logging.WARNING)
     logging.getLogger("openai").setLevel(logging.WARNING)
     logging.getLogger("anthropic").setLevel(logging.WARNING)
-    logging.getLogger("onnxruntime").setLevel(logging.ERROR)
+
+    # Completely disable onnxruntime warnings by adding a NullHandler
+    # This prevents onnxruntime's own warnings from appearing
+    import logging as _logging
+
+    onnx_logger = logging.getLogger("onnxruntime")
+    onnx_logger.setLevel(logging.ERROR)
+    onnx_logger.addHandler(_logging.NullHandler())
+
     logging.getLogger("diffusers").setLevel(logging.WARNING)
