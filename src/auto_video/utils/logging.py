@@ -140,7 +140,8 @@ def setup_logging(verbose: bool = False, log_file: Path | None = None) -> None:
     """Configure logging for auto-video application.
 
     In dev mode (verbose=True), use standard StreamHandler for detailed output.
-    In normal mode (verbose=False), use RichHandler which integrates better with TUI.
+    In normal mode (verbose=False), disable ALL terminal logging to prevent
+    interference with TUI display. Only write to log file if specified.
 
     Args:
         verbose: If True, set level to DEBUG. Otherwise, INFO.
@@ -151,26 +152,16 @@ def setup_logging(verbose: bool = False, log_file: Path | None = None) -> None:
 
     root_logger.handlers.clear()
 
-    # In verbose (dev) mode, use StreamHandler for plain text output
-    # In normal mode, use RichHandler for better TUI integration
+    # Only add console/terminal handler in dev (verbose) mode
+    # In normal mode, NO terminal output to prevent TUI interference
     if verbose:
         console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setLevel(logging.DEBUG)
         console_handler.setFormatter(VideoAwareFormatter(LOG_FORMAT, LOG_DATE_FORMAT))
         root_logger.addHandler(console_handler)
-    else:
-        from rich.console import Console
 
-        # Use RichHandler in normal mode to prevent log interference with TUI
-        rich_handler = RichHandler(
-            console=Console(),
-            show_time=True,
-            show_path=False,
-            rich_tracebacks=True,
-        )
-        rich_handler.setLevel(logging.INFO)
-        root_logger.addHandler(rich_handler)
-
+    # Always add file handler if log_file is specified
+    # This ensures logs are saved even in normal mode
     if log_file is not None:
         log_file.parent.mkdir(parents=True, exist_ok=True)
 
