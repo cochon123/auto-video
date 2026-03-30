@@ -955,20 +955,20 @@ class VideoComposer:
                 for clip in clips:
                     f.write(f"file '{clip.absolute()}'\n")
 
+            normalized_inputs = []
+            filter_steps: list[str] = []
+            for index in range(len(clips)):
+                normalized_label = f"v{index}"
+                normalized_inputs.append(f"[{normalized_label}]")
+                filter_steps.append(
+                    f"[{index}:v]fps=30,scale=1920:1080,setsar=1,format=yuv420p[{normalized_label}]"
+                )
+            filter_steps.append(
+                f"{''.join(normalized_inputs)}concat=n={len(clips)}:v=1:a=0[vout]"
+            )
+            filter_complex = ";".join(filter_steps)
             subprocess.run(
-                [
-                    self.ffmpeg_path,
-                    "-y",
-                    "-f",
-                    "concat",
-                    "-safe",
-                    "0",
-                    "-i",
-                    str(concat_file),
-                    "-c",
-                    "copy",
-                    str(output),
-                ],
+                [self.ffmpeg_path, "-y", *sum((["-i", str(clip)] for clip in clips), []), "-filter_complex", filter_complex, "-map", "[vout]", "-c:v", "libx264", "-preset", "fast", "-crf", "23", "-pix_fmt", "yuv420p", "-an", str(output)],
                 capture_output=True,
                 check=True,
                 timeout=600,

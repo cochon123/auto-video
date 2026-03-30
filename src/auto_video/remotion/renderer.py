@@ -9,6 +9,9 @@ import subprocess
 from pathlib import Path
 from typing import Any, Optional
 
+from auto_video.domain import RemotionSpec
+from auto_video.remotion.registry import get_registry
+
 
 class RemotionRenderer:
     """
@@ -27,12 +30,14 @@ class RemotionRenderer:
         """
         self.project_path = project_path
         self.node_modules = project_path / "node_modules"
+        self.entry_point = project_path / "index.ts"
 
     def render(
         self,
         composition_id: str,
         output_path: Path,
         props: dict[str, Any],
+        remotion_spec: RemotionSpec | None = None,
         codec: str = "h264",
         crf: int = 18,
         preset: str = "slow",
@@ -53,16 +58,31 @@ class RemotionRenderer:
         Returns:
             Path to the generated video
         """
+        registry = get_registry()
+        normalized_spec = registry.normalize_spec(
+            remotion_spec
+            or RemotionSpec(
+                composition_id=composition_id,
+                props=props,
+                render_settings={
+                    "fps": 30,
+                    "width": 1920,
+                    "height": 1080,
+                    "duration_in_frames": None,
+                },
+            )
+        )
+
         # Create a temporary file for props
         props_file = output_path.parent / f"{composition_id}_props.json"
         with open(props_file, "w") as f:
-            json.dump(props, f)
+            json.dump(normalized_spec.props, f)
 
         cmd = [
             "npx",
             "remotion",
             "render",
-            "Root",
+            str(self.entry_point),
             composition_id,
             "--props", str(props_file),
             "--output", str(output_path),
@@ -70,7 +90,11 @@ class RemotionRenderer:
             "--crf", str(crf),
             "--preset", preset,
             "--image-format", image_format,
-            "--overwrite"
+            "--fps", str(normalized_spec.render_settings.fps),
+            "--width", str(normalized_spec.render_settings.width),
+            "--height", str(normalized_spec.render_settings.height),
+            "--duration", str(normalized_spec.render_settings.duration_in_frames or 1),
+            "--overwrite",
         ]
 
         try:
@@ -99,6 +123,7 @@ class RemotionRenderer:
         composition_id: str,
         output_path: Path,
         props: dict[str, Any],
+        remotion_spec: RemotionSpec | None = None,
         frame: int = 0
     ) -> Path:
         """
@@ -115,18 +140,35 @@ class RemotionRenderer:
         Returns:
             Path to the generated image
         """
+        normalized_spec = get_registry().normalize_spec(
+            remotion_spec
+            or RemotionSpec(
+                composition_id=composition_id,
+                props=props,
+                render_settings={
+                    "fps": 30,
+                    "width": 1920,
+                    "height": 1080,
+                    "duration_in_frames": None,
+                },
+            )
+        )
         props_file = output_path.parent / f"{composition_id}_props.json"
         with open(props_file, "w") as f:
-            json.dump(props, f)
+            json.dump(normalized_spec.props, f)
 
         cmd = [
             "npx",
             "remotion",
             "still",
-            "Root",
+            str(self.entry_point),
             composition_id,
             "--props", str(props_file),
             "--output", str(output_path),
+            "--fps", str(normalized_spec.render_settings.fps),
+            "--width", str(normalized_spec.render_settings.width),
+            "--height", str(normalized_spec.render_settings.height),
+            "--duration", str(normalized_spec.render_settings.duration_in_frames or 1),
             "--frame", str(frame)
         ]
 
@@ -165,15 +207,10 @@ class RemotionRenderer:
         Returns:
             Duration in frames
         """
-        # Default durations from Root.tsx
-        default_durations = {
-            "Intro": 90,      # 3 seconds at 30fps
-            "LowerThird": 120,  # 4 seconds
-            "CustomTransition": 60,  # 2 seconds
-            "DataViz": 180   # 6 seconds
-        }
-
-        return default_durations.get(composition_id, 90)
+        try:
+            return get_registry().get_default_duration(composition_id, props)
+        except KeyError:
+            return 90
 
     def check_available(self) -> bool:
         """
@@ -184,7 +221,7 @@ class RemotionRenderer:
         """
         try:
             result = subprocess.run(
-                ["npx", "remotion", "--version"],
+                ["npx", "remotion", "versions"],
                 cwd=str(self.project_path),
                 capture_output=True,
                 text=True,

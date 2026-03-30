@@ -122,6 +122,7 @@ Thumbs.db
 
 # Model caches
 .cache/
+src/auto_video/remotion/node_modules/
 models/
 *.gguf
 *.pt

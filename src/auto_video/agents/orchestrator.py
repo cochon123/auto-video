@@ -171,6 +171,7 @@ class AgentOrchestrator:
                     remotion_source_file=None,
                     remotion_composition=scene_plan.remotion_composition,
                     remotion_props=scene_plan.remotion_props,
+                    remotion_spec=scene_plan.remotion_spec,
                     editable_notes=scene_plan.notes,
                 )
             )

@@ -6,6 +6,7 @@ Tests the Python bridge to Remotion and the rendering functionality.
 
 import pytest
 from pathlib import Path
+from auto_video.remotion import get_registry
 from auto_video.remotion.renderer import RemotionRenderer
 
 
@@ -36,6 +37,14 @@ class TestRemotionRenderer:
         assert renderer.get_composition_duration("LowerThird") == 120
         assert renderer.get_composition_duration("CustomTransition") == 60
         assert renderer.get_composition_duration("DataViz") == 180
+        assert renderer.get_composition_duration("ComparisonCard") == 120
+
+    def test_get_dynamic_list_reveal_duration(self, renderer):
+        duration = renderer.get_composition_duration(
+            "ListReveal",
+            props={"items": [{"title": "A"}, {"title": "B"}, {"title": "C"}]},
+        )
+        assert duration == 135
 
     def test_get_unknown_composition_duration(self, renderer):
         """Test getting duration for unknown composition returns default."""
@@ -53,6 +62,12 @@ class TestRemotionAvailability:
         available = renderer.check_available()
         # We don't assert anything specific as it depends on the environment
         assert isinstance(available, bool)
+
+
+def test_registry_knows_new_compositions():
+    registry = get_registry()
+    assert registry.has("ListReveal")
+    assert registry.has("ComparisonCard")
 
 
 @pytest.mark.integration

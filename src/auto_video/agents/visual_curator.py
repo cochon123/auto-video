@@ -13,8 +13,16 @@ import re
 from typing import Any
 
 from auto_video.agents.base import BaseAgent
-from auto_video.agents.contracts import AssetRequest, ResearchBundle, ScenePlan, ScriptScene, VideoBrief
-from auto_video.remotion import get_renderer
+from auto_video.agents.contracts import (
+    AssetRequest,
+    CompositionRenderSettings,
+    RemotionSpec,
+    ResearchBundle,
+    ScenePlan,
+    ScriptScene,
+    VideoBrief,
+)
+from auto_video.remotion import get_registry, get_renderer
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +100,7 @@ class VisualCuratorAgent(BaseAgent):
         ).lower()
         return scene.get("requires_complex_motion", False) or any(
             marker in text for marker in ["intro", "outro", "data viz", "graph", "chart", "animated", "kinetic", "lower third"]
-        )
+        ) or self._should_use_remotion_structured_layout(scene)
 
     def _plan_remotion_scene(self, scene: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
         if not context.get("remotion_available", True):
@@ -102,7 +110,7 @@ class VisualCuratorAgent(BaseAgent):
                 "assets_needed": scene.get("keywords", []) or [scene.get("visual_cues", "video")],
                 "ffmpeg_instructions": {
                     "ken_burns_type": self._select_ken_burns_type(scene),
-                    "duration": scene.get("duration", 60),
+                    "duration": self._scene_duration_s(scene),
                     "transition_next": self._select_transition_type(),
                 },
             }
@@ -123,6 +131,12 @@ class VisualCuratorAgent(BaseAgent):
                 "chartType": scene.get("chart_type", "bar"),
                 "title": scene.get("chart_title", "Data Visualization"),
             }
+        elif self._should_use_remotion_comparison(scene):
+            composition = "ComparisonCard"
+            remotion_spec = self._build_comparison_props(scene, context)
+        elif self._should_use_remotion_list_reveal(scene):
+            composition = "ListReveal"
+            remotion_spec = self._build_list_reveal_props(scene, context)
         elif "lower third" in visual_cues:
             composition = "LowerThird"
             remotion_spec = {
@@ -144,12 +158,12 @@ class VisualCuratorAgent(BaseAgent):
             "composition": composition,
             "assets_needed": [],
             "remotion_spec": remotion_spec,
-            "estimated_duration": int(float(scene.get("duration", 60)) * 30),
+            "estimated_duration": int(self._scene_duration_s(scene) * 30),
         }
 
     def _plan_ffmpeg_scene(self, scene: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
         keywords = scene.get("keywords", [])
-        duration = scene.get("duration", 60)
+        duration = self._scene_duration_s(scene)
         return {
             "rendering_method": "ffmpeg",
             "assets_needed": keywords,
@@ -157,8 +171,16 @@ class VisualCuratorAgent(BaseAgent):
                 "ken_burns_type": self._select_ken_burns_type(scene),
                 "duration": duration,
                 "transition_next": self._select_transition_type(),
-            },
-        }
+                },
+            }
+
+    def _scene_duration_s(self, scene: dict[str, Any]) -> float:
+        value = scene.get("duration_s", scene.get("duration", 60))
+        try:
+            duration = float(value)
+        except (TypeError, ValueError):
+            return 60.0
+        return duration if duration > 0 else 60.0
 
     def _select_ken_burns_type(self, scene: dict[str, Any]) -> str:
         visual_cues = str(scene.get("visual_cues", "")).lower()
@@ -213,6 +235,19 @@ class VisualCuratorAgent(BaseAgent):
         if research is not None:
             notes = f"{notes} | Research: {research.summary}"
 
+        remotion_spec = None
+        if rendering_method == "remotion":
+            composition_id = str(visual_plan.get("composition", "CustomTransition"))
+            remotion_spec = get_registry().normalize_spec(
+                RemotionSpec(
+                    composition_id=composition_id,
+                    props=visual_plan.get("remotion_spec", {}),
+                    render_settings=CompositionRenderSettings(
+                        duration_in_frames=int(visual_plan.get("estimated_duration", 90)),
+                    ),
+                )
+            )
+
         return ScenePlan(
             scene_id=str(scene.get("scene_id") or f"scene-{scene.get('scene_number', 1)}"),
             render_mode=render_mode,
@@ -220,6 +255,7 @@ class VisualCuratorAgent(BaseAgent):
             ffmpeg_effects=ffmpeg_effects,
             remotion_composition=visual_plan.get("composition") if rendering_method == "remotion" else None,
             remotion_props=visual_plan.get("remotion_spec", {}) if rendering_method == "remotion" else {},
+            remotion_spec=remotion_spec,
             subtitle_text=str(scene.get("narration", "")),
             notes=notes,
         )
@@ -323,6 +359,96 @@ class VisualCuratorAgent(BaseAgent):
         text = re.sub(r"^(a|an|the)\s+", "", text, flags=re.IGNORECASE)
         text = re.sub(r"\s+", " ", text).strip(" .")
         return text
+
+    def _should_use_remotion_structured_layout(self, scene: dict[str, Any]) -> bool:
+        if self._has_photo_cues(scene):
+            return False
+        return self._should_use_remotion_comparison(scene) or self._should_use_remotion_list_reveal(scene)
+
+    def _should_use_remotion_comparison(self, scene: dict[str, Any]) -> bool:
+        text = " ".join(str(scene.get(key, "")) for key in ("narration", "visual_intent", "visual_cues")).lower()
+        markers = [
+            " vs ",
+            "versus",
+            "compared to",
+            "on the other hand",
+            "split screen",
+            "side by side",
+            "one side",
+            "other side",
+        ]
+        return any(marker in text for marker in markers)
+
+    def _should_use_remotion_list_reveal(self, scene: dict[str, Any]) -> bool:
+        text = " ".join(str(scene.get(key, "")) for key in ("narration", "visual_intent", "visual_cues")).lower()
+        if not any(marker in text for marker in ["first", "second", "third", "finally", "steps", "reasons", "key points"]):
+            return False
+        return len(self._extract_enumeration_items(text)) >= 2
+
+    def _has_photo_cues(self, scene: dict[str, Any]) -> bool:
+        text = " ".join(str(scene.get(key, "")) for key in ("narration", "visual_intent", "visual_cues")).lower()
+        return any(
+            marker in text
+            for marker in [
+                "photo",
+                "image",
+                "footage",
+                "duckduckgo",
+                "pexels",
+                "close-up",
+                "close up",
+                "portrait",
+            ]
+        )
+
+    def _build_list_reveal_props(self, scene: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+        items = self._extract_enumeration_items(
+            " ".join(str(scene.get(key, "")) for key in ("narration", "visual_intent", "visual_cues"))
+        )
+        list_items = [{"title": item.title(), "subtitle": None} for item in items[:5]]
+        return {
+            "title": str(scene.get("purpose", "Key Points")).replace("_", " ").title(),
+            "items": list_items or [{"title": str(scene.get("narration", ""))[:40], "subtitle": None}],
+            "accentColor": context.get("accent_color", "#4ecdc4"),
+            "backgroundColor": "#0f172a",
+        }
+
+    def _build_comparison_props(self, scene: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+        left_title, right_title = self._extract_comparison_sides(scene)
+        return {
+            "headline": str(scene.get("purpose", "Comparison")).replace("_", " ").title(),
+            "leftTitle": left_title,
+            "leftBody": str(scene.get("narration", ""))[:120],
+            "rightTitle": right_title,
+            "rightBody": str(scene.get("visual_intent", ""))[:120] or str(scene.get("narration", ""))[:120],
+            "accentColor": context.get("accent_color", "#4ecdc4"),
+            "backgroundColor": "#111827",
+        }
+
+    def _extract_comparison_sides(self, scene: dict[str, Any]) -> tuple[str, str]:
+        text = " ".join(str(scene.get(key, "")) for key in ("visual_intent", "narration", "visual_cues"))
+
+        one_side_match = re.search(
+            r"one side shows?\s+(.+?)(?:\.|,|\band\b|\bwhile\b|\bthe other side\b)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        other_side_match = re.search(
+            r"(?:the\s+)?other side shows?\s+(.+?)(?:\.|,|\band\b|\bwhile\b|$)",
+            text,
+            flags=re.IGNORECASE,
+        )
+
+        if one_side_match and other_side_match:
+            left_title = self._normalize_visual_phrase(one_side_match.group(1)).title()
+            right_title = self._normalize_visual_phrase(other_side_match.group(1)).title()
+            if left_title and right_title:
+                return left_title[:42], right_title[:42]
+
+        items = self._extract_enumeration_items(text)
+        left_title = items[0].title() if len(items) >= 1 else "Option A"
+        right_title = items[1].title() if len(items) >= 2 else "Option B"
+        return left_title, right_title
 
     def _extract_subject_variants(self, scene: dict[str, Any]) -> list[str]:
         text = " ".join(

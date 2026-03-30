@@ -7,17 +7,18 @@
     "start": "remotion studio",
     "build": "remotion bundle",
     "render": "remotion render",
-    "check": "remotion check"
+    "check": "tsc --noEmit"
   },
   "dependencies": {
-    "@remotion/cli": "^4.0.136",
-    "remotion": "^4.0.136",
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "@remotion/cli": "4.0.441",
+    "remotion": "4.0.441",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "zod": "4.3.6"
   },
   "devDependencies": {
-    "@types/react": "^18.2.0",
-    "@types/react-dom": "^18.2.0",
-    "typescript": "^5.0.0"
+    "@types/react": "18.3.3",
+    "@types/react-dom": "18.3.0",
+    "typescript": "5.9.2"
   }
 }

@@ -1,19 +1,9 @@
 /**
  * Remotion configuration for auto-video.
+ *
+ * The current Remotion version in this workspace does not expose the older
+ * imperative `Config.set*()` API. Keeping this file as a no-op prevents CLI
+ * startup failures while preserving a dedicated config entry point.
  */
 
-import { Config } from "@remotion/cli/config";
-
-Config.setVideoImageFormat("jpeg");
-Config.setOverwriteOutput(true);
-Config.setLogLevel("info");
-
-// Default codec settings
-Config.setCodec({
-  codec: "h264",
-  crf: 18,
-  preset: "slow"
-});
-
-// Output settings
-Config.setPixelFormat("yuv420p");
+export {};

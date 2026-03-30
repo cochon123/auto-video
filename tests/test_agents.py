@@ -304,6 +304,73 @@ class TestVisualCuratorAgent:
         assert "red tomatoes" in queries
         assert "cherry tomatoes" in queries
 
+    def test_structured_abstract_list_uses_remotion(self, mock_llm):
+        curator = VisualCuratorAgent(mock_llm)
+
+        scene = {
+            "scene_id": "scene-2",
+            "type": "content",
+            "purpose": "three key reasons",
+            "narration": "First, speed matters. Second, accuracy matters. Finally, trust matters.",
+            "visual_intent": "Animated list reveal of the three key reasons.",
+            "duration": 18,
+            "keywords": ["speed", "accuracy", "trust"],
+        }
+
+        plan = curator.build_scene_plan(
+            scene,
+            previous_context={"remotion_available": True, "accent_color": "#4ecdc4"},
+        )
+
+        assert plan.render_mode == "remotion"
+        assert plan.remotion_composition == "ListReveal"
+        assert plan.remotion_spec is not None
+
+    def test_photo_driven_enumeration_stays_image_motion(self, mock_llm):
+        curator = VisualCuratorAgent(mock_llm)
+
+        scene = {
+            "scene_id": "scene-3",
+            "type": "content",
+            "purpose": "tomato varieties",
+            "narration": "There are three types of tomatoes: green tomatoes, red tomatoes, and cherry tomatoes.",
+            "visual_intent": "Show a photo of each tomato variety at the right moment.",
+            "duration": 18,
+            "keywords": ["tomatoes", "vegetables"],
+        }
+
+        plan = curator.build_scene_plan(
+            scene,
+            previous_context={"remotion_available": True, "accent_color": "#4ecdc4"},
+        )
+
+        assert plan.render_mode == "image_motion"
+
+    def test_split_screen_comparison_prefers_remotion(self, mock_llm):
+        curator = VisualCuratorAgent(mock_llm)
+
+        scene = {
+            "scene_id": "scene-4",
+            "type": "content",
+            "purpose": "comparison",
+            "narration": "Newton works well at low speeds, while relativity becomes essential for GPS satellites.",
+            "visual_intent": (
+                "Split screen. One side shows Newtonian physics predicting a ball trajectory. "
+                "The other side shows a GPS satellite with time correction."
+            ),
+            "duration": 18,
+            "keywords": ["newtonian mechanics", "relativity", "gps"],
+        }
+
+        plan = curator.build_scene_plan(
+            scene,
+            previous_context={"remotion_available": True, "accent_color": "#4ecdc4"},
+        )
+
+        assert plan.render_mode == "remotion"
+        assert plan.remotion_composition == "ComparisonCard"
+        assert plan.remotion_spec is not None
+
 
 class TestReviewerAgent:
     """Test Reviewer agent functionality."""

@@ -18,7 +18,10 @@ from auto_video.domain.models import (
     ScriptPlan,
     ScriptScene,
     # Timeline models
+    CompositionRenderSettings,
     RenderMode,
+    RemotionAsset,
+    RemotionSpec,
     TimelineAsset,
     TimelineScene,
     VideoManifest,
@@ -50,6 +53,9 @@ __all__ = [
     "ScriptScene",
     # Timeline models
     "RenderMode",
+    "CompositionRenderSettings",
+    "RemotionAsset",
+    "RemotionSpec",
     "TimelineAsset",
     "TimelineScene",
     "VideoManifest",

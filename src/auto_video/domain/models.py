@@ -19,6 +19,14 @@ RenderMode = Literal["stock_video", "image_motion", "remotion"]
 AssetKind = Literal["video", "image", "music", "sfx", "remotion_component"]
 AssetSource = Literal["pexels", "duckduckgo", "local", "generated"]
 RiskLevel = Literal["low", "medium", "high"]
+RemotionCompositionId = Literal[
+    "Intro",
+    "LowerThird",
+    "CustomTransition",
+    "DataViz",
+    "ListReveal",
+    "ComparisonCard",
+]
 
 
 class ContractBaseModel(BaseModel):
@@ -218,6 +226,7 @@ class ScenePlan(ContractBaseModel):
     ffmpeg_effects: list[str] = Field(default_factory=list)
     remotion_composition: str | None = None
     remotion_props: dict[str, Any] = Field(default_factory=dict)
+    remotion_spec: "RemotionSpec | None" = None
     subtitle_text: str = ""
     notes: str = ""
 
@@ -248,6 +257,33 @@ class TimelineAsset(ContractBaseModel):
     scene_end_s: float | None = None
 
 
+class CompositionRenderSettings(ContractBaseModel):
+    """Render settings for a Remotion composition."""
+
+    fps: int = 30
+    width: int = 1920
+    height: int = 1080
+    duration_in_frames: int | None = None
+
+
+class RemotionAsset(ContractBaseModel):
+    """Asset consumed by a Remotion composition."""
+
+    asset_id: str
+    kind: Literal["image", "video", "audio", "data"]
+    path: str
+    role: str
+
+
+class RemotionSpec(ContractBaseModel):
+    """Typed specification for rendering a Remotion composition."""
+
+    composition_id: RemotionCompositionId
+    props: dict[str, Any] = Field(default_factory=dict)
+    assets: list[RemotionAsset] = Field(default_factory=list)
+    render_settings: CompositionRenderSettings = Field(default_factory=CompositionRenderSettings)
+
+
 class TimelineScene(ContractBaseModel):
     """Scene placed on the timeline."""
 
@@ -262,6 +298,7 @@ class TimelineScene(ContractBaseModel):
     remotion_source_file: str | None = None
     remotion_composition: str | None = None
     remotion_props: dict[str, Any] = Field(default_factory=dict)
+    remotion_spec: RemotionSpec | None = None
     editable_notes: str = ""
 
 
@@ -306,10 +343,14 @@ __all__ = [
     "AssetKind",
     "AssetRequest",
     "AssetSource",
+    "CompositionRenderSettings",
     "LanguageCode",
     "ResearchBundle",
     "ResearchConfidence",
     "ResearchItem",
+    "RemotionAsset",
+    "RemotionCompositionId",
+    "RemotionSpec",
     "RenderMode",
     "RiskLevel",
     "SceneComplexity",

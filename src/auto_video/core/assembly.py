@@ -155,10 +155,21 @@ class AssemblyEngine:
             raise ValueError(f"Scene {scene.scene_id} is remotion but has no composition")
 
         output_path = workspace.assets_remotion_dir / f"{scene.scene_id}.mp4"
+        composition_id = (
+            scene.remotion_spec.composition_id
+            if getattr(scene, "remotion_spec", None) is not None
+            else scene.remotion_composition
+        )
+        props = (
+            scene.remotion_spec.props
+            if getattr(scene, "remotion_spec", None) is not None
+            else scene.remotion_props
+        )
         renderer.render(
-            composition_id=scene.remotion_composition,
+            composition_id=composition_id,
             output_path=output_path,
-            props=scene.remotion_props,
+            props=props,
+            remotion_spec=getattr(scene, "remotion_spec", None),
         )
         if scene.assets:
             scene.assets[0].path = str(output_path)
