@@ -23,9 +23,6 @@ from auto_video.domain.models import (
 class TimelineAsset(DomainTimelineAsset):
     """Extended timeline asset with scene-relative timing."""
 
-    scene_start_s: float | None = None
-    scene_end_s: float | None = None
-
     @field_validator("start_s", "end_s")
     @classmethod
     def _validate_time(cls, value: float) -> float:

@@ -244,6 +244,8 @@ class TimelineAsset(ContractBaseModel):
     start_s: float
     end_s: float
     role: str
+    scene_start_s: float | None = None
+    scene_end_s: float | None = None
 
 
 class TimelineScene(ContractBaseModel):
