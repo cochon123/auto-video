@@ -1,4 +1,8 @@
-"""Manifest schema for multi-agent video generation."""
+"""Manifest schema for multi-agent video generation.
+
+This module extends the domain models with additional validation
+and manifest-specific fields.
+"""
 
 from __future__ import annotations
 
@@ -8,26 +12,19 @@ from typing import Any
 
 from pydantic import Field, field_validator
 
-from auto_video.agents.contracts import ContractBaseModel
+from auto_video.domain.models import (
+    ContractBaseModel,
+    TimelineAsset as DomainTimelineAsset,
+    TimelineScene as DomainTimelineScene,
+    VideoManifest as DomainVideoManifest,
+)
 
 
-class TimelineAsset(ContractBaseModel):
-    asset_id: str
-    path: str
-    source: str
-    start_s: float
-    end_s: float
-    role: str
+class TimelineAsset(DomainTimelineAsset):
+    """Extended timeline asset with scene-relative timing."""
+
     scene_start_s: float | None = None
     scene_end_s: float | None = None
-
-    @field_validator("asset_id", "path", "source", "role")
-    @classmethod
-    def _strip_text(cls, value: str) -> str:
-        value = value.strip()
-        if not value:
-            raise ValueError("value must not be empty")
-        return value
 
     @field_validator("start_s", "end_s")
     @classmethod
@@ -64,27 +61,8 @@ class TimelineAsset(ContractBaseModel):
         return value
 
 
-class TimelineScene(ContractBaseModel):
-    scene_id: str
-    start_s: float
-    end_s: float
-    narration: str
-    subtitles: str
-    render_mode: str
-    assets: list[TimelineAsset] = Field(default_factory=list)
-    effects: list[str] = Field(default_factory=list)
-    remotion_source_file: str | None = None
-    remotion_composition: str | None = None
-    remotion_props: dict[str, Any] = Field(default_factory=dict)
-    editable_notes: str = ""
-
-    @field_validator("scene_id", "narration", "subtitles", "render_mode")
-    @classmethod
-    def _strip_text(cls, value: str) -> str:
-        value = value.strip()
-        if not value:
-            raise ValueError("value must not be empty")
-        return value
+class TimelineScene(DomainTimelineScene):
+    """Extended timeline scene with additional validation."""
 
     @field_validator("start_s", "end_s")
     @classmethod
@@ -119,19 +97,13 @@ class TimelineScene(ContractBaseModel):
         )
 
 
-class VideoManifest(ContractBaseModel):
-    video_id: str
-    title: str
-    language: str
-    total_duration_s: float
-    scenes: list[TimelineScene]
-    workspace_dir: str
-    output_video: str | None = None
+class VideoManifest(DomainVideoManifest):
+    """Extended video manifest with metadata and utility methods."""
+
     generated_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc)
     )
     schema_version: str = "1.0"
-    metadata: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("video_id", "title", "language", "workspace_dir")
     @classmethod

@@ -1,7 +1,0 @@
-You are a stock video search expert.
-Given this sentence from a video script:
-"{segment}"
-And this context from the full script:
-"{context}"
-
-Extract 2-3 specific keywords for searching stock video footage. Return ONLY a comma-separated list of keywords, nothing else. Example output: nature, technology, office
