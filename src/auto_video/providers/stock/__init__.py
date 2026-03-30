@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from auto_video.config.schema import VisualsConfig
+from auto_video.core.ffmpeg import create_ken_burns_video
 from auto_video.core.providers.base import ImageResult, StockProvider, VideoResult
 from auto_video.providers.stock.base import MockStockProvider
 
@@ -650,79 +651,20 @@ class StockManager:
     def _create_ken_burns_video(self, image_path: Path, output_path: Path, duration: float) -> None:
         """Convert an image to a video with Ken Burns (pan/zoom) effect.
 
+        Uses the centralized implementation from core.ffmpeg.effects.
+
         Args:
             image_path: Path to the source image.
             output_path: Path where the video should be saved.
             duration: Target video duration in seconds.
         """
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-
-        # Verify image exists
-        if not image_path.exists():
-            raise FileNotFoundError(f"Image not found: {image_path}")
-
-        # First, scale the image to 1920x1080 with padding if needed
-        scaled_path = output_path.parent / f"{output_path.stem}_scaled.jpg"
-        subprocess.run(
-            [
-                "ffmpeg",
-                "-y",
-                "-i",
-                str(image_path),
-                "-vf",
-                "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2",
-                "-qscale:v",
-                "2",
-                str(scaled_path),
-            ],
-            capture_output=True,
-            check=True,
-            timeout=30,
+        create_ken_burns_video(
+            image_path=image_path,
+            output_path=output_path,
+            duration=duration,
+            effect_type="zoom_in",
+            zoom_level=1.5,
         )
-
-        # Create video with simple pan effect using the zoompan filter
-        # A simpler approach: slow zoom in from center
-        total_frames = int(duration * 30)  # 30 fps
-
-        subprocess.run(
-            [
-                "ffmpeg",
-                "-y",
-                "-loop",
-                "1",
-                "-i",
-                str(scaled_path),
-                "-vf",
-                f"zoompan=z='min(zoom+0.0015,1.5)':d=1:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1920x1080:fps=30",
-                "-c:v",
-                "libx264",
-                "-preset",
-                "fast",
-                "-crf",
-                "23",
-                "-t",
-                str(duration),
-                "-pix_fmt",
-                "yuv420p",
-                "-r",
-                "30",
-                "-threads",
-                "2",
-                str(output_path),
-            ],
-            capture_output=True,
-            check=True,
-            timeout=120,
-        )
-
-        # Clean up scaled image
-        scaled_path.unlink(missing_ok=True)
-
-        # Verify the output video was created and has content
-        if not output_path.exists() or output_path.stat().st_size < 1000:
-            raise ValueError(f"Output video is invalid or empty: {output_path}")
-
-        logger.debug("[StockManager] Ken Burns video created: %s", output_path)
 
 
 __all__ = ["StockManager", "MockStockProvider"]

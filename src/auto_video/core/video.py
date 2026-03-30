@@ -15,6 +15,7 @@ import tempfile
 from pathlib import Path
 from typing import Literal
 
+from auto_video.core.ffmpeg import create_ken_burns_video
 from auto_video.core.providers.base import Asset, ImageResult, StockProvider, VideoResult
 from auto_video.utils.gpu import GPUDetector
 
@@ -120,32 +121,16 @@ class LocalAssetsManager:
         return 0.0
 
     def _create_ken_burns_effect(self, image_path: Path, output_path: Path) -> None:
-        duration = 4.0
-        subprocess.run(
-            [
-                "ffmpeg",
-                "-y",
-                "-loop",
-                "1",
-                "-i",
-                str(image_path),
-                "-vf",
-                f"scale=1920:1080:force_original_aspect_ratio=decrease,"
-                f"pad=1920:1080:(ow-iw)/2:(oh-ih)/2,"
-                f"zoompan=z='min(zoom+0.0015,1.5)':d=1:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
-                f"duration={duration}:fps=30",
-                "-c:v",
-                "libx264",
-                "-t",
-                str(duration),
-                "-pix_fmt",
-                "yuv420p",
-                "-r",
-                "30",
-                str(output_path),
-            ],
-            capture_output=True,
-            timeout=30,
+        """Create a Ken Burns effect video from an image.
+
+        Uses the centralized implementation from core.ffmpeg.effects.
+        """
+        create_ken_burns_video(
+            image_path=image_path,
+            output_path=output_path,
+            duration=4.0,
+            effect_type="zoom_in",
+            zoom_level=1.5,
         )
 
     def _extend_sequence(self, sequence: list[Asset], needed_duration: float) -> None:
@@ -655,79 +640,18 @@ class VideoComposer:
         duration: float = 4.0,
         zoom_level: float = 1.5
     ) -> None:
-        """Create a Ken Burns effect with several pan/zoom variants."""
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        scaled_path = output_path.parent / f"{output_path.stem}_scaled.jpg"
-        clamped_zoom = max(1.05, min(zoom_level, 2.0))
-        total_frames = max(int(duration * 30), 1)
+        """Create a Ken Burns effect with several pan/zoom variants.
 
-        zoom_expr = "1.0"
-        x_expr = "iw/2-(iw/zoom/2)"
-        y_expr = "ih/2-(ih/zoom/2)"
-
-        if effect_type == "zoom_in":
-            zoom_expr = f"min(zoom+0.0015*{clamped_zoom:.2f}, {clamped_zoom:.2f})"
-        elif effect_type == "zoom_out":
-            zoom_expr = f"if(eq(on,1),{clamped_zoom:.2f},max(zoom-0.0015,1.0))"
-        elif effect_type == "pan_left":
-            zoom_expr = "1.1"
-            x_expr = f"(iw-iw/zoom)*(1-on/{total_frames})"
-        elif effect_type == "pan_right":
-            zoom_expr = "1.1"
-            x_expr = f"(iw-iw/zoom)*(on/{total_frames})"
-        elif effect_type == "diagonal":
-            zoom_expr = f"min(zoom+0.0012*{clamped_zoom:.2f}, {clamped_zoom:.2f})"
-            x_expr = f"(iw-iw/zoom)*(on/{total_frames})"
-            y_expr = f"(ih-ih/zoom)*(on/{total_frames})"
-
-        subprocess.run(
-            [
-                self.ffmpeg_path,
-                "-y",
-                "-i",
-                str(image_path),
-                "-vf",
-                "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2",
-                "-qscale:v",
-                "2",
-                str(scaled_path),
-            ],
-            capture_output=True,
-            check=True,
-            timeout=30,
+        Uses the centralized implementation from core.ffmpeg.effects.
+        """
+        create_ken_burns_video(
+            image_path=image_path,
+            output_path=output_path,
+            duration=duration,
+            effect_type=effect_type,
+            zoom_level=zoom_level,
+            ffmpeg_path=self.ffmpeg_path,
         )
-
-        subprocess.run(
-            [
-                self.ffmpeg_path,
-                "-y",
-                "-loop",
-                "1",
-                "-i",
-                str(scaled_path),
-                "-vf",
-                f"zoompan=z='{zoom_expr}':x='{x_expr}':y='{y_expr}':d=1:s=1920x1080:fps=30",
-                "-c:v",
-                "libx264",
-                "-preset",
-                "fast",
-                "-crf",
-                "23",
-                "-t",
-                str(duration),
-                "-pix_fmt",
-                "yuv420p",
-                "-r",
-                "30",
-                "-movflags",
-                "+faststart",
-                str(output_path),
-            ],
-            capture_output=True,
-            check=True,
-            timeout=120,
-        )
-        scaled_path.unlink(missing_ok=True)
 
     def apply_transition(
         self,
