@@ -322,7 +322,16 @@ class LLMSetupWizard:
             "anthropic": ["claude-3-opus", "claude-3-sonnet", "claude-3-haiku"],
             "groq": ["llama3.1-70b", "mixtral-8x7b", "gemma-7b"],
             "google": ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.5-pro", "gemma-3-27b-it"],
-            "zhipuai": ["glm-4.5", "glm-4-flash", "glm-4-long", "glm-z1-air", "glm-4.5-flash", "glm-4.7", "glm-4.7-flash", "glm-5"],
+            "zhipuai": [
+                "glm-4.5",
+                "glm-4-flash",
+                "glm-4-long",
+                "glm-z1-air",
+                "glm-4.5-flash",
+                "glm-4.7",
+                "glm-4.7-flash",
+                "glm-5",
+            ],
         }
 
         provider_models = models.get(provider, [])
@@ -712,7 +721,7 @@ class VisualsSetupWizard:
         self.console.print()
 
         choices = [
-            "1. Stock Footage API (Pexels, Pixabay)",
+            "1. Stock Footage API (Pexels, DuckDuckGo, Pixabay)",
             "2. Local Assets (your video/image folders)",
             "3. AI Generated Images",
             "4. Hybrid (combine multiple sources)",
@@ -756,6 +765,10 @@ class VisualsSetupWizard:
         pixabay = self._setup_pixabay()
         if pixabay:
             providers.append(pixabay)
+
+        duckduckgo = self._setup_duckduckgo()
+        if duckduckgo:
+            providers.append(duckduckgo)
 
         if not providers:
             return None
@@ -953,6 +966,21 @@ class VisualsSetupWizard:
             return None
 
         return "pixabay"
+
+    def _setup_duckduckgo(self) -> str | None:
+        """Setup DuckDuckGo provider.
+
+        Returns:
+            Provider name if enabled, None otherwise.
+        """
+        if not Confirm.ask(
+            "Enable DuckDuckGo (images only, no API key required)?\n"
+            "  Good for specific searches (presidents, landmarks, etc.)",
+            default=True,
+        ):
+            return None
+
+        return "duckduckgo"
 
     def _setup_local(self) -> VisualsConfig | None:
         """Setup local assets.

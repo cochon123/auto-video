@@ -127,8 +127,8 @@ def create_default_config(path: Path) -> AppConfig:
             api_key=None,
             temperature=0.7,
         ),
-        tts=TTSConfig(mode="local", voice="default"),
-        visuals=VisualsConfig(mode="stock", providers=["pexels"]),
+        tts=TTSConfig(mode="api", provider="openai", model="tts-1", voice="alloy"),
+        visuals=VisualsConfig(mode="stock", providers=["pexels", "duckduckgo"]),
         image_gen=ImageGenConfig(enabled=False),
         storage=StorageConfig(
             videos_path=Path.home() / "Videos" / "auto-videos",

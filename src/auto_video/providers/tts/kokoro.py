@@ -74,16 +74,46 @@ class KokoroTTSProvider(TTSProvider):
             logger.info("Kokoro TTS: Using CPU only")
 
         self._available_voices = [
+            # American English (existing)
             "af_bella",
             "af_nicole",
             "af_sarah",
             "af_sky",
             "am_adam",
             "am_michael",
+            # British English (existing)
             "bf_emma",
             "bf_isabella",
             "bm_george",
             "bm_lewis",
+            # French (NEW)
+            "ff_siwis",
+            # Spanish (NEW)
+            "ef_dora",
+            "em_alex",
+            "em_santa",
+            # Italian (NEW)
+            "if_sara",
+            "im_nicola",
+            # Brazilian Portuguese (NEW)
+            "pf_dora",
+            "pm_alex",
+            "pm_santa",
+            # Hindi (NEW)
+            "hf_alpha",
+            "hf_beta",
+            "hm_david",
+            "hm_raj",
+            # Japanese (NEW)
+            "jf_alpha",
+            "jf_beta",
+            "jm_gamma",
+            "jm_kumo",
+            # Mandarin Chinese (NEW)
+            "zf_alpha",
+            "zf_beta",
+            "zf_gamma",
+            "zm_xu",
         ]
         self._model_path = self._cache_dir / "kokoro-v1.0.onnx"
         self._voices_path = self._cache_dir / "voices.bin"
@@ -184,7 +214,7 @@ class KokoroTTSProvider(TTSProvider):
             import soundfile as sf
 
             audio_samples, sample_rate = self._model.create(
-                text, voice=selected_voice, speed=1.0, lang="en-us"
+                text, voice=selected_voice, speed=1.0, lang=self.config.lang
             )
 
             sf.write(str(output_path), audio_samples, sample_rate)

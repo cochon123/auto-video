@@ -1,0 +1,59 @@
+You are an expert in creating dynamic, engaging YouTube videos. Your mission is to break down this script into MANY short visual sequences.
+
+CRITICAL REQUIREMENTS:
+- Create approximately 3 illustrations per sentence on average
+- Break long sentences into 2-3 visual parts
+- Each visual should correspond to a meaningful phrase or concept (3-5 words)
+- Keep videos DYNAMIC with frequent visual changes
+- A single 10-word sentence should have ~3 different visuals
+- if you see a citation for example "rice, tomato and banana" you should use one picture or every element
+
+Script to analyze:
+"""
+{script}
+"""
+
+INSTRUCTIONS:
+1. Break the script into SHORT visual sequences (3-5 words each)
+2. For each sequence, choose 1-3 precise keywords for stock search
+3. Intelligently alternate between videos and photos:
+   - VIDEO: action, movement, demonstrations, transitions
+   - PHOTO: static concepts, landscapes, portraits, statistics
+4. Avoid repetition - each illustration should add visual variety
+5. Choose the appropriate image source (ONLY for images, set source to null for videos):
+   - Pexels: Use for vague/generic content (landscapes, smiling people, waste piles, abstract concepts, people in general, office scenes, generic locations)
+   - DuckDuckGo: Use ONLY for VERY SPECIFIC images (president photos, country maps, specific country landmarks, famous people photos, historical figures, specific monuments, specific locations)
+
+Return ONLY a JSON in this format:
+[
+  {{
+    "text": "first few words from script",
+    "keywords": ["keyword1"],
+    "media_type": "video",
+    "source": null
+  }},
+  {{
+    "text": "next few words from script",
+    "keywords": ["keyword2", "keyword3"],
+    "media_type": "image",
+    "source": "pexels"
+  }},
+  {{
+    "text": "more text from script",
+    "keywords": ["specific_person_name"],
+    "media_type": "image",
+    "source": "duckduckgo"
+  }}
+]
+
+EXAMPLE:
+For "The Eiffel Tower stands tall. The sun rises over the mountains."
+Return:
+[
+  {{"text": "The Eiffel Tower", "keywords": ["eiffel tower", "paris landmark"], "media_type": "image", "source": "duckduckgo"}},
+  {{"text": "stands tall", "keywords": ["tower", "monument"], "media_type": "video", "source": null}},
+  {{"text": "The sun rises", "keywords": ["sunrise", "dawn"], "media_type": "video", "source": null}},
+  {{"text": "over the mountains", "keywords": ["mountains", "peaks"], "media_type": "image", "source": "pexels"}}
+]
+
+Return ONLY the JSON, without any other text.

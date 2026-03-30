@@ -40,6 +40,31 @@ class Workspace:
         return self.workspace_path / "script.txt"
 
     @property
+    def brief_path(self) -> Path:
+        """Get path for the structured video brief."""
+        return self.workspace_path / "brief.json"
+
+    @property
+    def research_path(self) -> Path:
+        """Get path for the research bundle."""
+        return self.workspace_path / "research.json"
+
+    @property
+    def script_plan_path(self) -> Path:
+        """Get path for the structured script plan."""
+        return self.workspace_path / "script_plan.json"
+
+    @property
+    def scene_plan_path(self) -> Path:
+        """Get path for the structured scene plan."""
+        return self.workspace_path / "scene_plan.json"
+
+    @property
+    def asset_collection_path(self) -> Path:
+        """Get path for the visual asset collection report."""
+        return self.workspace_path / "asset_collection.json"
+
+    @property
     def audio_path(self) -> Path:
         """Get path for the generated audio file."""
         return self.workspace_path / "audio.wav"
@@ -79,9 +104,60 @@ class Workspace:
         """Get path for the visual keywords JSON debug file."""
         return self.workspace_path / "visual_keywords_raw.json"
 
+    @property
+    def visual_asset_log_path(self) -> Path:
+        """Get path for the visual asset resolution log."""
+        return self.workspace_path / "visual_asset_log.jsonl"
+
+    @property
+    def assets_dir(self) -> Path:
+        """Get the base assets directory."""
+        return self.workspace_path / "assets"
+
+    @property
+    def assets_video_dir(self) -> Path:
+        """Get the video assets directory."""
+        return self.assets_dir / "video"
+
+    @property
+    def assets_image_dir(self) -> Path:
+        """Get the image assets directory."""
+        return self.assets_dir / "image"
+
+    @property
+    def assets_music_dir(self) -> Path:
+        """Get the music assets directory."""
+        return self.assets_dir / "audio" / "music"
+
+    @property
+    def assets_sfx_dir(self) -> Path:
+        """Get the sound effects assets directory."""
+        return self.assets_dir / "audio" / "sfx"
+
+    @property
+    def assets_remotion_dir(self) -> Path:
+        """Get the Remotion assets directory."""
+        return self.assets_dir / "remotion"
+
+    @property
+    def manifest_dir(self) -> Path:
+        """Get the manifest directory."""
+        return self.workspace_path / "manifest"
+
+    @property
+    def manifest_path(self) -> Path:
+        """Get the video manifest file path."""
+        return self.manifest_dir / "video_manifest.json"
+
     def create(self) -> None:
         self.workspace_path.mkdir(parents=True, exist_ok=True)
         self.workspace_path.chmod(0o755)
+        self.assets_video_dir.mkdir(parents=True, exist_ok=True)
+        self.assets_image_dir.mkdir(parents=True, exist_ok=True)
+        self.assets_music_dir.mkdir(parents=True, exist_ok=True)
+        self.assets_sfx_dir.mkdir(parents=True, exist_ok=True)
+        self.assets_remotion_dir.mkdir(parents=True, exist_ok=True)
+        self.manifest_dir.mkdir(parents=True, exist_ok=True)
         self._created = True
 
     def cleanup(self, keep_artifacts: bool = False) -> None:
@@ -123,6 +199,21 @@ class Workspace:
         if self.script_path.exists():
             artifacts["script"] = self.script_path
 
+        if self.brief_path.exists():
+            artifacts["brief"] = self.brief_path
+
+        if self.research_path.exists():
+            artifacts["research"] = self.research_path
+
+        if self.script_plan_path.exists():
+            artifacts["script_plan"] = self.script_plan_path
+
+        if self.scene_plan_path.exists():
+            artifacts["scene_plan"] = self.scene_plan_path
+
+        if self.asset_collection_path.exists():
+            artifacts["asset_collection"] = self.asset_collection_path
+
         if self.audio_path.exists():
             artifacts["audio"] = self.audio_path
 
@@ -143,6 +234,12 @@ class Workspace:
 
         if self.state_path.exists():
             artifacts["state"] = self.state_path
+
+        if self.manifest_path.exists():
+            artifacts["manifest"] = self.manifest_path
+
+        if self.visual_asset_log_path.exists():
+            artifacts["visual_asset_log"] = self.visual_asset_log_path
 
         return artifacts
 

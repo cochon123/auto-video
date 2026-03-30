@@ -158,7 +158,7 @@ class TextToTimestampAligner:
         Returns:
             List of words in order.
         """
-        return re.findall(r'\b\w+\b', text)
+        return re.findall(r"\b\w+\b", text)
 
     def _find_word_index(self, word: str, search_from: int = 0) -> Optional[int]:
         """Find a word in the timestamp list.
@@ -173,7 +173,7 @@ class TextToTimestampAligner:
         word = word.lower()
         for i in range(search_from, len(self.words)):
             # Normalize the word from timestamp for comparison
-            timestamp_word = self.words[i].word.lower().strip('.,!?;:"\'')
+            timestamp_word = self.words[i].word.lower().strip(".,!?;:\"'")
             if timestamp_word == word:
                 logger.debug(
                     "[TimingAligner] Found word %r at index %d (searched from %d)",
@@ -211,12 +211,21 @@ class TextToTimestampAligner:
 
         end_time = start_time + estimated_duration
 
+        # FIX: Advance search position by word count to prevent subsequent segments
+        # from searching from the wrong position when word matching fails
+        self._last_used_index += word_count
+
+        # Ensure we don't exceed the word list bounds
+        if self._last_used_index >= len(self.words):
+            self._last_used_index = len(self.words) - 1
+
         logger.warning(
-            "[TimingAligner] Estimated timing for %d words: start=%.2fs, end=%.2fs, duration=%.2fs",
+            "[TimingAligner] Estimated timing for %d words: start=%.2fs, end=%.2fs, duration=%.2fs, advanced_index_to=%d",
             word_count,
             start_time,
             end_time,
             estimated_duration,
+            self._last_used_index,
         )
 
         return TextMatch(start_time=start_time, end_time=end_time, confidence=0.5)

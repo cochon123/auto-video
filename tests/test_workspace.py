@@ -44,6 +44,8 @@ def test_workspace_paths():
         assert ws.thumbnail_path == base_path / "test_001" / "thumbnail.png"
         assert ws.final_path == base_path / "test_001" / "final.mp4"
         assert ws.logs_path == base_path / "test_001" / "generation.log"
+        assert ws.visual_asset_log_path == base_path / "test_001" / "visual_asset_log.jsonl"
+        assert ws.asset_collection_path == base_path / "test_001" / "asset_collection.json"
         assert ws.state_path == base_path / "test_001" / "state.json"
 
 
@@ -141,13 +143,15 @@ def test_list_artifacts_with_files():
         ws.script_path.write_text("script content")
         ws.audio_path.write_bytes(b"audio data")
         ws.final_path.write_bytes(b"final video data")
+        ws.visual_asset_log_path.write_text("{}\n")
 
         artifacts = ws.list_artifacts()
 
-        assert len(artifacts) == 3
+        assert len(artifacts) == 4
         assert "script" in artifacts
         assert "audio" in artifacts
         assert "final" in artifacts
+        assert "visual_asset_log" in artifacts
         assert artifacts["script"] == ws.script_path
 
 

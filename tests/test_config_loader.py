@@ -168,8 +168,11 @@ def test_create_default_config():
 
         assert config.llm.provider == "openai"
         assert config.llm.model == "gpt-4"
-        assert config.tts.mode == "local"
+        assert config.tts.mode == "api"
+        assert config.tts.provider == "openai"
+        assert config.tts.model == "tts-1"
         assert config.visuals.mode == "stock"
+        assert "duckduckgo" in config.visuals.providers
         assert config.default_format == "long"
         assert config.default_lang == "fr"
 

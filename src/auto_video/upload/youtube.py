@@ -6,23 +6,36 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
 
-from google.auth.transport.requests import Request
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow  # type: ignore
-from googleapiclient.discovery import build  # type: ignore
-from googleapiclient.errors import HttpError  # type: ignore
-from googleapiclient.http import MediaFileUpload  # type: ignore
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from auto_video.utils.security import secure_credential_file
 
 if TYPE_CHECKING:
-    pass
+    from google.auth.transport.requests import Request
+    from google.oauth2.credentials import Credentials
+    from google_auth_oauthlib.flow import InstalledAppFlow
+    from googleapiclient.discovery import build
+    from googleapiclient.errors import HttpError
+    from googleapiclient.http import MediaFileUpload
+else:
+    try:
+        from google.auth.transport.requests import Request
+        from google.oauth2.credentials import Credentials
+        from google_auth_oauthlib.flow import InstalledAppFlow
+        from googleapiclient.discovery import build
+        from googleapiclient.errors import HttpError
+        from googleapiclient.http import MediaFileUpload
+    except ImportError:
+        Request = None  # type: ignore[assignment]
+        Credentials = None  # type: ignore[assignment]
+        InstalledAppFlow = None  # type: ignore[assignment]
+        build = None  # type: ignore[assignment]
+        MediaFileUpload = None  # type: ignore[assignment]
+        HttpError = type("HttpError", (Exception,), {})
 
 logger = logging.getLogger(__name__)
 
 SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
-
 
 @dataclass
 class UploadResult:
@@ -49,6 +62,12 @@ class YouTubeUploader:
         self._credentials: Any = None
 
     def authenticate(self) -> None:
+        if Request is None or Credentials is None or InstalledAppFlow is None or build is None:
+            raise ImportError(
+                "YouTube upload requires the optional 'youtube' dependencies. "
+                "Install with: pip install auto-video[youtube]"
+            )
+
         if not self.credentials_path.exists():
             raise FileNotFoundError(f"Credentials file not found: {self.credentials_path}")
 
@@ -99,6 +118,12 @@ class YouTubeUploader:
         privacy: str = "unlisted",
         progress_callback: Callable[[int, int], None] | None = None,
     ) -> UploadResult:
+        if MediaFileUpload is None:
+            raise ImportError(
+                "YouTube upload requires the optional 'youtube' dependencies. "
+                "Install with: pip install auto-video[youtube]"
+            )
+
         self._ensure_authenticated()
 
         if not video_path.exists():

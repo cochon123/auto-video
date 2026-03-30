@@ -11,6 +11,8 @@ dependencies = [
     "httpx>=0.25.0",
     "openai>=1.0.0",
     "tomli>=2.0.0;python_version<'3.11'",
+    "crewai>=0.70.0",
+    "faster-whisper>=1.0.0",
 ]
 
 [project.optional-dependencies]
@@ -32,12 +34,16 @@ tts-local = [
     "onnxruntime>=1.17.0",  # Fallback CPU version
 ]
 stt-local = [
-    "whisper-cpp>=0.5.0",
+    "faster-whisper>=1.0.0",
+    "ctranslate2>=4.0.0",
 ]
 image-local = [
     "diffusers>=0.25.0",
     "transformers>=4.35.0",
     "accelerate>=0.25.0",
+]
+visual-search = [
+    "duckduckgo-search>=6.0.0",
 ]
 youtube = [
     "google-auth>=2.0.0",
@@ -62,3 +68,6 @@ strict = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "integration: integration tests that require external tooling",
+]

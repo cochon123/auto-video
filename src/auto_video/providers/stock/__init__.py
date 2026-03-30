@@ -2,6 +2,7 @@
 
 import logging
 import subprocess
+import shutil
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -40,6 +41,12 @@ class StockManager:
             providers.append(PixabayProvider(self.config.pixabay_api_key))
             logger.debug("[StockManager] ✓ Pixabay provider added")
 
+        if "duckduckgo" in self.config.providers:
+            from auto_video.providers.stock.duckduckgo import DuckDuckGoProvider
+
+            providers.append(DuckDuckGoProvider())
+            logger.debug("[StockManager] ✓ DuckDuckGo provider added")
+
         if not providers:
             providers.append(MockStockProvider())
             logger.warning("[StockManager] No stock providers configured, using MockStockProvider")
@@ -51,6 +58,7 @@ class StockManager:
         segments: "list[SegmentInfo]",
         output_dir: Path,
         global_keywords: list[str] | None = None,
+        clip_index_start: int = 0,
     ) -> list[Path]:
         """Get clips for each segment with specific keywords and duration.
 
@@ -65,12 +73,16 @@ class StockManager:
         Returns:
             List of paths to downloaded video clips (one clip per segment).
         """
-        logger.info("[StockManager] Starting clip search for %d segments, output_dir: %s", len(segments), output_dir)
+        logger.info(
+            "[StockManager] Starting clip search for %d segments, output_dir: %s",
+            len(segments),
+            output_dir,
+        )
         if global_keywords:
             logger.debug("[StockManager] Global keywords provided: %s", global_keywords[:5])
 
         clips: list[Path] = []
-        clip_index = 0
+        clip_index = clip_index_start
 
         # Default fallback keywords in increasing order of generality
         fallback_keywords_tiers = [
@@ -178,7 +190,11 @@ class StockManager:
                     clips.append(downloaded)
                     clip_index += 1
 
-                    tier_name = "LLM" if tier_idx == 0 else ("Global" if tier_idx == 1 else f"Fallback-{tier_idx-1}")
+                    tier_name = (
+                        "LLM"
+                        if tier_idx == 0
+                        else ("Global" if tier_idx == 1 else f"Fallback-{tier_idx - 1}")
+                    )
                     logger.info(
                         "✓ Segment %d: %s (%.2fs) using %s keywords: %r",
                         clip_index,
@@ -191,7 +207,9 @@ class StockManager:
                     break
 
                 except Exception as e:
-                    logger.warning("[StockManager] Failed to download clip with %r: %s", query, str(e))
+                    logger.warning(
+                        "[StockManager] Failed to download clip with %r: %s", query, str(e)
+                    )
                     continue
 
             if not clip_found:
@@ -225,7 +243,11 @@ class StockManager:
         if not results:
             raise ValueError("No clips to choose from")
 
-        logger.debug("[StockManager] Finding best match for target_duration=%.2fs from %d results", target_duration, len(results))
+        logger.debug(
+            "[StockManager] Finding best match for target_duration=%.2fs from %d results",
+            target_duration,
+            len(results),
+        )
 
         best_result = results[0]
         best_diff = abs(best_result[1].duration - target_duration)
@@ -307,6 +329,8 @@ class StockManager:
         segments: "list[MediaSegment]",
         output_dir: Path,
         global_keywords: list[str] | None = None,
+        preserve_source_dir: Path | None = None,
+        clip_index_start: int = 0,
     ) -> list[Path]:
         """Get media (videos or images) for each MediaSegment.
 
@@ -328,7 +352,7 @@ class StockManager:
         )
 
         clips: list[Path] = []
-        clip_index = 0
+        clip_index = clip_index_start
 
         # Default fallback keywords
         fallback_keywords_tiers = [
@@ -390,19 +414,29 @@ class StockManager:
                 try:
                     if media_type == "image":
                         clip_path = self._get_image_for_segment(
-                            query, duration, output_dir, clip_index
+                            query,
+                            duration,
+                            output_dir,
+                            clip_index,
+                            segment_info.source,
+                            preserve_source_dir=preserve_source_dir,
                         )
                         if clip_path:
                             clips.append(clip_path)
                             clip_index += 1
-                            tier_name = "LLM" if tier_idx == 0 else ("Global" if tier_idx == 1 else f"Fallback-{tier_idx-1}")
+                            tier_name = (
+                                "LLM"
+                                if tier_idx == 0
+                                else ("Global" if tier_idx == 1 else f"Fallback-{tier_idx - 1}")
+                            )
                             logger.info(
-                                "✓ Segment %d: %s (%.2fs) using %s keywords: %r [IMAGE]",
+                                "✓ Segment %d: %s (%.2fs) using %s keywords: %r [IMAGE, source=%s]",
                                 clip_index,
                                 segment_info.text[:40],
                                 duration,
                                 tier_name,
                                 query,
+                                segment_info.source or "default",
                             )
                             media_found = True
                             break
@@ -413,7 +447,11 @@ class StockManager:
                         if clip_path:
                             clips.append(clip_path)
                             clip_index += 1
-                            tier_name = "LLM" if tier_idx == 0 else ("Global" if tier_idx == 1 else f"Fallback-{tier_idx-1}")
+                            tier_name = (
+                                "LLM"
+                                if tier_idx == 0
+                                else ("Global" if tier_idx == 1 else f"Fallback-{tier_idx - 1}")
+                            )
                             logger.info(
                                 "✓ Segment %d: %s (%.2fs) using %s keywords: %r [VIDEO]",
                                 clip_index,
@@ -496,7 +534,13 @@ class StockManager:
             return None
 
     def _get_image_for_segment(
-        self, query: str, duration: float, output_dir: Path, clip_index: int
+        self,
+        query: str,
+        duration: float,
+        output_dir: Path,
+        clip_index: int,
+        source: str | None = None,
+        preserve_source_dir: Path | None = None,
     ) -> Path | None:
         """Get an image and convert it to a video with Ken Burns effect.
 
@@ -505,6 +549,7 @@ class StockManager:
             duration: Target duration.
             output_dir: Output directory.
             clip_index: Clip index for naming.
+            source: Preferred source ("pexels" or "duckduckgo"), None for default order.
 
         Returns:
             Path to generated video, or None if failed.
@@ -513,36 +558,84 @@ class StockManager:
         temp_dir.mkdir(parents=True, exist_ok=True)
 
         try:
+            # Determine provider order based on source preference
+            provider_order: list[str] = []
+            if source == "duckduckgo":
+                provider_order = ["DuckDuckGoProvider", "PexelsProvider", "PixabayProvider"]
+            elif source == "pexels":
+                provider_order = ["PexelsProvider", "DuckDuckGoProvider", "PixabayProvider"]
+            else:
+                provider_order = ["PexelsProvider", "DuckDuckGoProvider", "PixabayProvider"]
+
+            # Check if requested provider is available and log warning if not
+            if source:
+                available_providers = [p.__class__.__name__ for p in self._providers]
+                requested_provider_class = (
+                    "DuckDuckGoProvider"
+                    if source == "duckduckgo"
+                    else "PexelsProvider"
+                    if source == "pexels"
+                    else None
+                )
+                if requested_provider_class and requested_provider_class not in available_providers:
+                    logger.warning(
+                        "[StockManager] Requested provider '%s' (source='%s') is not configured. "
+                        "Available providers: %s. Will use fallback provider.",
+                        requested_provider_class,
+                        source,
+                        ", ".join(available_providers) if available_providers else "none",
+                    )
+
             all_results: list[tuple[StockProvider, ImageResult]] = []
 
-            for provider in self._providers:
-                try:
-                    results = provider.search_images(query)
-                    logger.debug(
-                        "[StockManager] %s returned %d image results for %r",
-                        provider.__class__.__name__,
-                        len(results),
-                        query,
-                    )
-                    all_results.extend([(provider, r) for r in results])
-                except Exception as e:
-                    logger.debug(
-                        "[StockManager] %s image search failed for %r: %s",
-                        provider.__class__.__name__,
-                        query,
-                        e,
-                    )
-                    continue
+            for provider_name in provider_order:
+                for provider in self._providers:
+                    if provider.__class__.__name__ != provider_name:
+                        continue
+
+                    try:
+                        results = provider.search_images(query)
+                        logger.debug(
+                            "[StockManager] %s returned %d image results for %r",
+                            provider.__class__.__name__,
+                            len(results),
+                            query,
+                        )
+                        if results:
+                            all_results.extend([(provider, r) for r in results])
+                            break
+                    except Exception as e:
+                        logger.warning(
+                            "[StockManager] %s failed for query %r: %s",
+                            provider.__class__.__name__,
+                            query,
+                            str(e),
+                        )
+                        continue
+
+                if all_results:
+                    break
 
             if not all_results:
+                logger.debug("[StockManager] No image results found for query: %s", query)
                 return None
 
             # Select the first image (could add smarter selection later)
             provider, image_result = all_results[0]
 
             # Download the image
-            image_path = temp_dir / f"img_{clip_index:03d}_{image_result.id}.jpg"
+            image_path = temp_dir / f"img_{clip_index:03d}.jpg"
             downloaded = provider.download_image(image_result.id, image_path)
+
+            if preserve_source_dir is not None:
+                preserve_source_dir.mkdir(parents=True, exist_ok=True)
+                preserved_image_path = preserve_source_dir / f"source_{clip_index:03d}.jpg"
+                shutil.copy2(downloaded, preserved_image_path)
+                logger.debug(
+                    "[StockManager] Preserved source image for %r at %s",
+                    query,
+                    preserved_image_path,
+                )
 
             # Convert to video with Ken Burns effect
             video_path = output_dir / f"clip_{clip_index:03d}.mp4"

@@ -11,8 +11,14 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, field_validator
 
+from auto_video.agents import AgentOrchestrator
+from auto_video.agents.contracts import ResearchBundle, ScenePlan, ScriptPlan, VideoBrief
 from auto_video.config.schema import AppConfig
+from auto_video.core.assembly import AssemblyEngine
+from auto_video.core.assets import AssetPlanner
 from auto_video.core.llm import LLM
+from auto_video.manifest import load_manifest, save_manifest
+from auto_video.manifest.schema import VideoManifest
 from auto_video.core.subtitles import SubtitleGenerator, SubtitleStyle
 from auto_video.core.thumbnail import ThumbnailGenerator
 from auto_video.core.tts import TTS
@@ -20,7 +26,6 @@ from auto_video.core.video import LocalAssetsManager, VideoComposer
 from auto_video.core.visual_keywords import MediaSegment, VisualKeywordExtractor
 from auto_video.core.timing_aligner import TextToTimestampAligner
 from auto_video.providers.stock import StockManager
-from auto_video.upload.youtube import YouTubeUploader
 from auto_video.utils.security import (
     validate_duration,
     validate_format,
@@ -31,6 +36,7 @@ from auto_video.utils.security import (
 from auto_video.utils.workspace import Workspace
 
 logger = logging.getLogger(__name__)
+YouTubeUploader: Any | None = None
 
 
 class PipelineStep(Enum):
@@ -176,6 +182,83 @@ class VideoPipeline:
             pass
         return 0.0
 
+    def _create_orchestrator(self) -> tuple[LLM, AgentOrchestrator]:
+        llm = LLM(self.config.llm)
+        return llm, AgentOrchestrator(
+            llm,
+            progress_display=self._progress_display,
+            verbose=bool(getattr(self._progress_display, "__class__", object).__name__ == "DevProgressDisplay"),
+        )
+
+    def _write_json_artifact(self, path: Path, payload: BaseModel | None) -> None:
+        if payload is None:
+            return
+        path.write_text(payload.model_dump_json(indent=2), encoding="utf-8")
+
+    def _real_path_exists(self, candidate: Any) -> bool:
+        return isinstance(candidate, Path) and candidate.exists()
+
+    def _script_plan_to_text(self, script_plan: ScriptPlan) -> str:
+        parts = [scene.narration.strip() for scene in script_plan.scenes if scene.narration.strip()]
+        return "\n\n".join(parts)
+
+    def _load_brief(self, workspace: Workspace) -> VideoBrief:
+        if self._real_path_exists(workspace.brief_path):
+            return VideoBrief.model_validate_json(workspace.brief_path.read_text(encoding="utf-8"))
+        title = (
+            workspace.script_path.read_text(encoding="utf-8").splitlines()[0].strip()
+            if self._real_path_exists(workspace.script_path)
+            else "Auto-generated video"
+        )
+        return VideoBrief(
+            title=title or "Auto-generated video",
+            language="fr",
+            format="long",
+            target_duration_s=60,
+            audience="general",
+            tone="informative",
+            requires_research=False,
+            creative_direction="Fallback brief reconstructed from legacy script artifact.",
+            factual_risk="low",
+        )
+
+    def _load_research(self, workspace: Workspace) -> ResearchBundle | None:
+        if not self._real_path_exists(workspace.research_path):
+            return None
+        return ResearchBundle.model_validate_json(workspace.research_path.read_text(encoding="utf-8"))
+
+    def _load_script_plan(self, workspace: Workspace) -> ScriptPlan:
+        if self._real_path_exists(workspace.script_plan_path):
+            return ScriptPlan.model_validate_json(workspace.script_plan_path.read_text(encoding="utf-8"))
+        raw_script = (
+            workspace.script_path.read_text(encoding="utf-8").strip()
+            if self._real_path_exists(workspace.script_path)
+            else ""
+        )
+        narration = raw_script or "Generated script."
+        return ScriptPlan(
+            title="Legacy Script",
+            hook=narration[:80] or "Legacy hook",
+            scenes=[
+                {
+                    "scene_id": "scene_01",
+                    "order": 1,
+                    "purpose": "legacy_content",
+                    "narration": narration,
+                    "duration_s": 30.0,
+                    "visual_intent": "Fallback visuals from legacy script",
+                    "sound_intent": "Neutral documentary bed",
+                    "complexity": "standard",
+                    "keywords": ["legacy", "script"],
+                }
+            ],
+            closing_cta=None,
+        )
+
+    def _load_scene_plans(self, workspace: Workspace) -> list[ScenePlan]:
+        payload = json.loads(workspace.scene_plan_path.read_text(encoding="utf-8"))
+        return [ScenePlan.model_validate(item) for item in payload]
+
     def _validate_artifacts(
         self, state: PipelineState, workspace: Workspace, up_to_step: int
     ) -> bool:
@@ -195,16 +278,14 @@ class VideoPipeline:
                 logger.warning("Audio not tracked in state artifacts")
 
         if up_to_step >= 3:
-            clips_dir = workspace.workspace_path / "clips"
-            if not clips_dir.exists():
-                logger.error("Clips directory missing for resume")
+            if not workspace.scene_plan_path.exists():
+                logger.error("Scene plan artifact missing for resume")
                 return False
-            clips = list(clips_dir.glob("*.mp4"))
-            if not clips:
-                logger.error("No clip artifacts found for resume")
+            if not workspace.manifest_path.exists():
+                logger.error("Manifest artifact missing for resume")
                 return False
-            if "clips" not in state.artifacts:
-                logger.warning("Clips not tracked in state artifacts")
+            if "manifest" not in state.artifacts:
+                logger.warning("Manifest not tracked in state artifacts")
 
         if up_to_step >= 4:
             if not workspace.video_raw_path.exists():
@@ -278,6 +359,18 @@ class VideoPipeline:
         if workspace.script_path.exists():
             state.artifacts["script"] = str(workspace.script_path)
 
+        if workspace.brief_path.exists():
+            state.artifacts["brief"] = str(workspace.brief_path)
+
+        if workspace.research_path.exists():
+            state.artifacts["research"] = str(workspace.research_path)
+
+        if workspace.script_plan_path.exists():
+            state.artifacts["script_plan"] = str(workspace.script_plan_path)
+
+        if workspace.scene_plan_path.exists():
+            state.artifacts["scene_plan"] = str(workspace.scene_plan_path)
+
         if workspace.audio_path.exists():
             state.artifacts["audio"] = str(workspace.audio_path)
 
@@ -298,6 +391,9 @@ class VideoPipeline:
 
         if workspace.thumbnail_path.exists():
             state.artifacts["thumbnail"] = str(workspace.thumbnail_path)
+
+        if workspace.manifest_path.exists():
+            state.artifacts["manifest"] = str(workspace.manifest_path)
 
     def _record_error(self, state: PipelineState, step: PipelineStep, error: Exception) -> None:
         """Record error information in state."""
@@ -917,7 +1013,9 @@ class VideoPipeline:
                 if self._progress_display:
                     self._progress_display.start_step(6, "Upload vers YouTube...")
 
-                uploader = YouTubeUploader(self.config.youtube.credentials_path or Path())
+                from auto_video.upload.youtube import YouTubeUploader as YouTubeUploaderImpl
+
+                uploader = YouTubeUploaderImpl(self.config.youtube.credentials_path or Path())
                 self._progress = PipelineProgress(workspace.video_id, PipelineStep.UPLOAD, 0.0)
 
                 uploader.authenticate()
@@ -1144,30 +1242,47 @@ class VideoPipeline:
 
         if from_step_value <= 2:
             try:
-                llm = LLM(self.config.llm)
+                llm, orchestrator = self._create_orchestrator()
                 self._progress = PipelineProgress(video_id, PipelineStep.SCRIPT, 0.0)
 
                 if self._progress_display:
-                    self._progress_display.start_step(0, "Génération du script...")
+                    self._progress_display.start_step(0, "Orchestration des agents de préproduction...")
 
-                script = llm.generate_script(state.title, duration, state.lang)
+                brief = orchestrator.prepare_brief(
+                    state.title or "Auto-generated video",
+                    duration,
+                    state.lang,
+                    state.format,
+                )
+                research = orchestrator.run_research_if_needed(brief)
+                script_plan = orchestrator.generate_script(brief, research)
+                script_plan, review = orchestrator.review_script(script_plan)
+                script = self._script_plan_to_text(script_plan)
+
+                self._write_json_artifact(workspace.brief_path, brief)
+                self._write_json_artifact(workspace.research_path, research)
+                self._write_json_artifact(workspace.script_plan_path, script_plan)
                 workspace.script_path.write_text(script, encoding="utf-8")
+
                 completed_steps.append(PipelineStep.SCRIPT)
                 state.completed_steps.append(1)
                 state.current_step = max(state.current_step, 2)
                 state.updated_at = datetime.now().isoformat()
                 self._update_artifacts(state, workspace)
                 self._save_state(state)
-                logger.info("Script generated: %s", workspace.script_path)
+                logger.info(
+                    "Agent preproduction complete: script=%s, review_score=%.2f",
+                    workspace.script_path,
+                    review.score,
+                )
 
-                # Cleanup LLM to free VRAM
                 llm.cleanup()
                 del llm
 
                 if self._progress_display:
                     self._progress_display.update_script_content(script)
                     self._progress_display.update_artifact_path(0, str(workspace.script_path))
-                    self._progress_display.complete_step(0, "Script généré")
+                    self._progress_display.complete_step(0, "Brief, recherche et script générés")
 
             except Exception as e:
                 failed_step = PipelineStep.SCRIPT
@@ -1242,176 +1357,44 @@ class VideoPipeline:
                     youtube_url=youtube_url,
                 )
 
-        clips_dir = workspace.workspace_path / "clips"
-        clips_dir.mkdir(exist_ok=True)
         clips: list[Path] = []
 
         if from_step_value <= 4:
             try:
-                llm = LLM(self.config.llm)
+                llm, orchestrator = self._create_orchestrator()
                 self._progress = PipelineProgress(video_id, PipelineStep.VISUALS, 0.0)
 
                 if self._progress_display:
-                    self._progress_display.start_step(2, "Recherche de clips vidéo...")
+                    self._progress_display.start_step(2, "Plan visuel multi-agent et collecte des assets...")
 
-                if not keywords:
-                    keywords = llm.extract_keywords(script)
+                brief = self._load_brief(workspace)
+                research = self._load_research(workspace)
+                script_plan = self._load_script_plan(workspace)
+                scene_plans = orchestrator.plan_visuals(brief, script_plan)
+                asset_planner = AssetPlanner(self.config.visuals)
+                resolved_assets = asset_planner.collect_scene_assets(script_plan, scene_plans, workspace)
+                manifest = orchestrator.build_manifest(
+                    video_id,
+                    brief,
+                    script_plan,
+                    scene_plans,
+                    workspace,
+                    resolved_assets,
+                )
+                workspace.scene_plan_path.write_text(
+                    json.dumps([scene.model_dump(mode="json") for scene in scene_plans], indent=2, ensure_ascii=False),
+                    encoding="utf-8",
+                )
+                save_manifest(manifest, workspace.manifest_path)
+                keywords = []
+                for scene in script_plan.scenes:
+                    for keyword in scene.keywords:
+                        if keyword not in keywords:
+                            keywords.append(keyword)
+                clips = [Path(asset.path) for scene_assets in resolved_assets.values() for asset in scene_assets]
 
-                # Cleanup LLM to free VRAM
                 llm.cleanup()
                 del llm
-
-                stock_manager = StockManager(self.config.visuals)
-
-                if self.config.visuals.visual_llm and self.config.visuals.mode in (
-                    "stock",
-                    "hybrid",
-                ):
-                    try:
-                        # Check if we should use the new structured output system
-                        use_structured = getattr(self.config.visuals, "structured_output", True)
-                        enable_images = getattr(self.config.visuals, "enable_images", True)
-
-                        if use_structured:
-                            logger.info("Using VisualKeywordExtractor with structured output (all-at-once)")
-                            logger.debug(
-                                "[DEBUG] Before VisualKeywordExtractor: script_type=%s, script_len=%s, script_is_none=%s, first_100_chars=%r",
-                                type(script).__name__,
-                                len(script) if script is not None else "N/A",
-                                script is None,
-                                script[:100] if script else None,
-                            )
-                            keyword_extractor = VisualKeywordExtractor(self.config.visuals.visual_llm, workspace)
-                            media_segments: list[MediaSegment] = keyword_extractor.extract_keywords_all_at_once(
-                                script
-                            )
-                            # Cleanup VisualKeywordExtractor LLM to free VRAM
-                            keyword_extractor.cleanup()
-                            del keyword_extractor
-
-                            # Adjust media types if images are disabled
-                            if not enable_images:
-                                for seg in media_segments:
-                                    seg.media_type = "video"
-
-                            # Use word-level timing for precise synchronization
-                            try:
-                                logger.info("[Timing] Getting word-level timestamps from audio...")
-                                subtitle_gen = SubtitleGenerator()
-                                transcription = subtitle_gen.transcribe(workspace.audio_path)
-
-                                if transcription.words:
-                                    logger.info(
-                                        "[Timing] Got %d word timestamps, aligning %d media segments...",
-                                        len(transcription.words),
-                                        len(media_segments),
-                                    )
-                                    aligner = TextToTimestampAligner(transcription.words)
-
-                                    for segment in media_segments:
-                                        timing = aligner.find_timing_for_text(segment.text)
-                                        segment.start_time = timing.start_time
-                                        segment.end_time = timing.end_time
-                                        segment.duration = timing.end_time - timing.start_time
-
-                                    logger.info(
-                                        "[Timing] ✓ Aligned %d segments with word-level timestamps",
-                                        len(media_segments),
-                                    )
-                                else:
-                                    logger.warning(
-                                        "[Timing] No word timestamps available, using estimated durations"
-                                    )
-                            except Exception as e:
-                                logger.warning(
-                                    "[Timing] Word-level alignment failed: %s, using estimated durations",
-                                    str(e),
-                                )
-
-                            clips = stock_manager.get_media_for_segments(
-                                media_segments, clips_dir, global_keywords=keywords
-                            )
-                        else:
-                            # Use the old segmented extraction (legacy)
-                            logger.info("Using VisualKeywordExtractor for segment-based clips (legacy mode)")
-                            logger.debug(
-                                "[DEBUG] Before VisualKeywordExtractor: script_type=%s, script_len=%s, script_is_none=%s, first_100_chars=%r",
-                                type(script).__name__,
-                                len(script) if script is not None else "N/A",
-                                script is None,
-                                script[:100] if script else None,
-                            )
-                            keyword_extractor = VisualKeywordExtractor(self.config.visuals.visual_llm, workspace)
-                            segments_with_keywords = keyword_extractor.extract_keywords_per_segment(
-                                script
-                            )
-                            # Cleanup VisualKeywordExtractor LLM to free VRAM
-                            keyword_extractor.cleanup()
-                            del keyword_extractor
-                            clips = stock_manager.get_clips_for_segments(
-                                segments_with_keywords, clips_dir, global_keywords=keywords
-                            )
-
-                        if not clips and self.config.visuals.mode == "hybrid":
-                            stock_clips = stock_manager.get_clips_for_script(
-                                script, keywords, audio_duration * 0.5, clips_dir
-                            )
-                            clips.extend(stock_clips)
-                    except Exception as e:
-                        logger.warning(
-                            "VisualKeywordExtractor failed: %s, falling back to global keywords\n"
-                            "Traceback:\n%s\n"
-                            "Script state: type=%s, is_none=%s, len=%s",
-                            str(e),
-                            traceback.format_exc(),
-                            type(script).__name__,
-                            script is None,
-                            len(script) if script is not None else "N/A",
-                        )
-                        if self.config.visuals.mode == "stock":
-                            clips = stock_manager.get_clips_for_script(
-                                script, keywords, audio_duration, clips_dir
-                            )
-                        elif self.config.visuals.mode == "hybrid":
-                            stock_clips = stock_manager.get_clips_for_script(
-                                script, keywords, audio_duration * 0.5, clips_dir
-                            )
-                            clips.extend(stock_clips)
-                            if self.config.visuals.local_path:
-                                local_manager = LocalAssetsManager(
-                                    Path(self.config.visuals.local_path), True
-                                )
-                                assets = local_manager.get_random_sequence(audio_duration * 0.5)
-                                local_clips = local_manager.prepare_clips(assets)
-                                clips.extend(local_clips)
-                        else:
-                            clips = []
-
-                elif self.config.visuals.mode == "stock":
-                    clips = stock_manager.get_clips_for_script(
-                        script, keywords, audio_duration, clips_dir
-                    )
-                elif self.config.visuals.mode == "local" and self.config.visuals.local_path:
-                    local_manager = LocalAssetsManager(Path(self.config.visuals.local_path), True)
-                    assets = local_manager.get_random_sequence(audio_duration)
-                    clips = local_manager.prepare_clips(assets)
-                elif self.config.visuals.mode == "hybrid":
-                    stock_clips = stock_manager.get_clips_for_script(
-                        script, keywords, audio_duration * 0.5, clips_dir
-                    )
-                    clips.extend(stock_clips)
-                    if self.config.visuals.local_path:
-                        local_manager = LocalAssetsManager(
-                            Path(self.config.visuals.local_path), True
-                        )
-                        assets = local_manager.get_random_sequence(audio_duration * 0.5)
-                        local_clips = local_manager.prepare_clips(assets)
-                        clips.extend(local_clips)
-                else:
-                    for i in range(5):
-                        clip_path = clips_dir / f"mock_clip_{i}.mp4"
-                        clip_path.write_bytes(b"MOCK_VIDEO_DATA")
-                        clips.append(clip_path)
 
                 completed_steps.append(PipelineStep.VISUALS)
                 state.completed_steps.append(3)
@@ -1419,11 +1402,11 @@ class VideoPipeline:
                 state.updated_at = datetime.now().isoformat()
                 self._update_artifacts(state, workspace)
                 self._save_state(state)
-                logger.info("Visuals collected: %d clips", len(clips))
+                logger.info("Visual planning complete: %d asset-backed scenes", len(clips))
 
                 if self._progress_display:
-                    self._progress_display.update_artifact_path(2, str(clips_dir))
-                    self._progress_display.complete_step(2, f"{len(clips)} clips collectés")
+                    self._progress_display.update_artifact_path(2, str(workspace.manifest_path))
+                    self._progress_display.complete_step(2, f"Manifest et assets générés ({len(clips)} assets)")
 
             except Exception as e:
                 failed_step = PipelineStep.VISUALS
@@ -1452,27 +1435,8 @@ class VideoPipeline:
 
         if from_step_value <= 5:
             try:
-                mock_detected = False
-                for clip in clips:
-                    if clip.exists() and clip.stat().st_size < 1000:
-                        content = clip.read_bytes()
-                        if content == b"MOCK_VIDEO_DATA":
-                            mock_detected = True
-                            break
-
-                if mock_detected:
-                    raise ValueError(
-                        "No valid video clips found. The system used mock/placeholder data "
-                        "instead of real videos.\n"
-                        "To fix this, please configure at least one stock video provider:\n"
-                        "  1. Run: auto-video setup visuals\n"
-                        "  2. Enable 'pexels' and/or 'pixabay' and enter your API keys\n"
-                        "  3. Or configure a local assets folder with your own videos\n"
-                        f"  4. Then run: auto-video resume --video-id {video_id}"
-                    )
-
                 if self._progress_display:
-                    self._progress_display.start_step(3, "Montage vidéo...")
+                    self._progress_display.start_step(3, "Assemblage depuis le manifest...")
 
                 composer = VideoComposer(
                     gpu_acceleration=self.config.video.gpu_acceleration,
@@ -1480,13 +1444,14 @@ class VideoPipeline:
                     quality=self.config.video.quality,
                 )
                 self._progress = PipelineProgress(video_id, PipelineStep.MONTAGE, 0.0)
-
-                composer.concatenate_clips(clips, workspace.video_raw_path, audio_duration)
-                composer.add_audio(
-                    workspace.video_raw_path, workspace.audio_path, workspace.final_path
-                )
-                composer.apply_format_with_temp(
-                    workspace.final_path, workspace.final_path, state.format
+                manifest = load_manifest(workspace.manifest_path)
+                assembly = AssemblyEngine(composer)
+                assembly.render_from_manifest(
+                    manifest,
+                    workspace,
+                    workspace.audio_path,
+                    workspace.final_path,
+                    state.format,
                 )
 
                 completed_steps.append(PipelineStep.MONTAGE)
@@ -1635,6 +1600,8 @@ class VideoPipeline:
 
         if not state.skip_upload and self.config.youtube.enabled:
             try:
+                from auto_video.upload.youtube import YouTubeUploader
+
                 uploader = YouTubeUploader(self.config.youtube.credentials_path or Path())
                 self._progress = PipelineProgress(video_id, PipelineStep.UPLOAD, 0.0)
 

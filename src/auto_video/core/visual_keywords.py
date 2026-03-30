@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from auto_video.config.schema import LLMProviderConfig
-from auto_video.core.llm import LLM
+from auto_video.core.llm import LLM, load_prompt
 from auto_video.utils.workspace import Workspace
 
 logger = logging.getLogger(__name__)
@@ -30,6 +30,7 @@ class MediaSegment:
     keywords: list[str]
     duration: float
     media_type: Literal["video", "image"] = "video"
+    source: Literal["pexels", "duckduckgo"] | None = None
     start_time: float | None = None
     end_time: float | None = None
 
@@ -58,9 +59,7 @@ class VisualKeywordExtractor:
             script[:100] if script else None,
         )
         if script is None:
-            logger.warning(
-                "[VisualKeywords] Received None script! Using empty string."
-            )
+            logger.warning("[VisualKeywords] Received None script! Using empty string.")
             script = ""
 
         logger.info("[VisualKeywords] Starting segmentation and keyword extraction...")
@@ -70,7 +69,9 @@ class VisualKeywordExtractor:
         results = []
 
         for i, segment in enumerate(segments):
-            logger.debug("[VisualKeywords] Processing segment %d/%d: %r", i + 1, len(segments), segment[:80])
+            logger.debug(
+                "[VisualKeywords] Processing segment %d/%d: %r", i + 1, len(segments), segment[:80]
+            )
             try:
                 keywords = self._extract_keywords_for_segment(segment, script)
                 duration = self._estimate_segment_duration(segment)
@@ -83,7 +84,9 @@ class VisualKeywordExtractor:
                     duration,
                 )
             except Exception as e:
-                logger.warning("[VisualKeywords] Failed to extract keywords for segment %d: %s", i, str(e))
+                logger.warning(
+                    "[VisualKeywords] Failed to extract keywords for segment %d: %s", i, str(e)
+                )
                 keywords = random.sample(
                     self._default_keywords, min(2, len(self._default_keywords))
                 )
@@ -146,21 +149,14 @@ class VisualKeywordExtractor:
             full_script is None,
         )
         if full_script is None:
-            logger.warning(
-                "[VisualKeywords] Received None full_script! Using empty string."
-            )
+            logger.warning("[VisualKeywords] Received None full_script! Using empty string.")
             full_script = ""
         context = full_script[:1000] if len(full_script) > 1000 else full_script
 
-        prompt = (
-            "You are a stock video search expert. "
-            f"Given this sentence from a video script:\n"
-            f'"{segment}"\n'
-            f"And this context from the full script:\n"
-            f'"{context}"\n\n'
-            "Extract 2-3 specific keywords for searching stock video footage. "
-            "Return ONLY a comma-separated list of keywords, nothing else. "
-            "Example output: nature, technology, office"
+        prompt = load_prompt(
+            "visual_keywords_segment.txt",
+            segment=segment,
+            context=context,
         )
 
         logger.debug("[VisualKeywords] Sending prompt to LLM for segment: %r", segment[:60])
@@ -175,7 +171,9 @@ class VisualKeywordExtractor:
             response = response.replace("\n", ",")
             keywords = [k.strip() for k in response.split(",") if k.strip()]
 
-            logger.debug("[VisualKeywords] LLM response: %r -> keywords: %s", response[:100], keywords)
+            logger.debug(
+                "[VisualKeywords] LLM response: %r -> keywords: %s", response[:100], keywords
+            )
 
             return keywords[:3] if keywords else random.sample(self._default_keywords, 2)
 
@@ -211,7 +209,7 @@ class VisualKeywordExtractor:
 
             # Split by sentence boundaries: . ! ? followed by space or end of string
             # Handles common sentence endings and respects abbreviations
-            sentences = re.split(r'(?<=[.!?])\s+(?=[A-Z])', line)
+            sentences = re.split(r"(?<=[.!?])\s+(?=[A-Z])", line)
 
             for sentence in sentences:
                 sentence = sentence.strip()
@@ -272,7 +270,9 @@ class VisualKeywordExtractor:
             if self._workspace:
                 try:
                     self._workspace.workspace_path.mkdir(parents=True, exist_ok=True)
-                    self._workspace.visual_keywords_debug_path.write_text(response, encoding="utf-8")
+                    self._workspace.visual_keywords_debug_path.write_text(
+                        response, encoding="utf-8"
+                    )
                     logger.info(
                         "[VisualKeywords] Saved raw LLM response to %s",
                         self._workspace.visual_keywords_debug_path,
@@ -292,6 +292,7 @@ class VisualKeywordExtractor:
                 text = seg_data.get("text", "").strip()
                 keywords = seg_data.get("keywords", [])
                 media_type = seg_data.get("media_type", "video")
+                source = seg_data.get("source")
 
                 if not text:
                     continue
@@ -319,15 +320,17 @@ class VisualKeywordExtractor:
                     keywords=keywords,
                     duration=duration,
                     media_type=media_type,
+                    source=source if media_type == "image" else None,
                 )
                 results.append(segment)
 
                 logger.debug(
-                    "[VisualKeywords] Segment %d: text=%r, keywords=%s, media_type=%s, duration=%.2fs",
+                    "[VisualKeywords] Segment %d: text=%r, keywords=%s, media_type=%s, source=%s, duration=%.2fs",
                     i + 1,
                     text[:50],
                     keywords,
                     media_type,
+                    source,
                     duration,
                 )
 
@@ -352,61 +355,7 @@ class VisualKeywordExtractor:
             return self._fallback_to_segmented_extraction(script)
 
     def _build_structured_prompt(self, script: str) -> str:
-        """Build the structured prompt for JSON output.
-
-        Args:
-            script: The script text to analyze.
-
-        Returns:
-            The formatted prompt string.
-        """
-        return f"""You are an expert in creating dynamic, engaging YouTube videos. Your mission is to break down this script into MANY short visual sequences.
-
-CRITICAL REQUIREMENTS:
-- Create approximately 3 illustrations per sentence on average
-- Break long sentences into 2-3 visual parts
-- Each visual should correspond to a meaningful phrase or concept (3-5 words)
-- Keep videos DYNAMIC with frequent visual changes
-- A single 10-word sentence should have ~3 different visuals
-
-Script to analyze:
-\"\"\"
-{script}
-\"\"\"
-
-INSTRUCTIONS:
-1. Break the script into SHORT visual sequences (3-5 words each)
-2. For each sequence, choose 1-3 precise keywords for stock search
-3. Intelligently alternate between videos and photos:
-   - VIDEO: action, movement, demonstrations, transitions
-   - PHOTO: static concepts, landscapes, portraits, statistics
-4. Avoid repetition - each illustration should add visual variety
-
-Return ONLY a JSON in this format:
-[
-  {{
-    "text": "first few words from script",
-    "keywords": ["keyword1"],
-    "media_type": "video"
-  }},
-  {{
-    "text": "next few words from script",
-    "keywords": ["keyword2", "keyword3"],
-    "media_type": "image"
-  }}
-]
-
-EXAMPLE:
-For "The sun rises over the mountains. The rays illuminate the valley."
-Return:
-[
-  {{"text": "The sun rises", "keywords": ["sunrise", "dawn"], "media_type": "video"}},
-  {{"text": "over the mountains", "keywords": ["mountains", "peaks"], "media_type": "image"}},
-  {{"text": "The rays illuminate", "keywords": ["sunlight", "rays"], "media_type": "video"}},
-  {{"text": "the valley", "keywords": ["valley", "landscape"], "media_type": "image"}}
-]
-
-Return ONLY the JSON, without any other text."""
+        return load_prompt("visual_keywords_structured.txt", script=script)
 
     def _extract_json_from_response(self, response: str) -> list[dict] | None:
         """Extract and parse JSON from LLM response.

@@ -22,6 +22,7 @@ class TTSConfig(BaseModel):
     mode: Literal["local", "api", "hybrid"]
     model: str | None = None
     voice: str = "default"
+    lang: str = "en-us"  # Language for multi-lingual TTS (en-us, fr-fr, es, it, pt-br, hi, ja, zh)
     api_key: str | None = None
     provider: str | None = None
 

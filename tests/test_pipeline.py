@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
+from auto_video.agents.contracts import ResearchBundle, ScenePlan, ScriptPlan, VideoBrief
 from auto_video.config.schema import AppConfig
 from auto_video.core.pipeline import (
     PipelineProgress,
@@ -14,6 +15,7 @@ from auto_video.core.pipeline import (
     PipelineStep,
     VideoPipeline,
 )
+from auto_video.manifest.schema import TimelineAsset, TimelineScene, VideoManifest
 
 
 @pytest.fixture
@@ -41,6 +43,117 @@ def config(temp_dir: Path) -> AppConfig:
 @pytest.fixture
 def pipeline(config: AppConfig) -> VideoPipeline:
     return VideoPipeline(config)
+
+
+def make_orchestration_outputs(temp_dir: Path) -> tuple[VideoBrief, ScriptPlan, list[ScenePlan], VideoManifest]:
+    brief = VideoBrief(
+        title="Test Video",
+        language="fr",
+        format="long",
+        target_duration_s=60,
+        audience="general",
+        tone="informative",
+        requires_research=False,
+        creative_direction="Test direction",
+        factual_risk="low",
+    )
+    script_plan = ScriptPlan(
+        title="Test Video",
+        hook="Hook",
+        scenes=[
+            {
+                "scene_id": "scene_01",
+                "order": 1,
+                "purpose": "hook",
+                "narration": "Test scene one narration.",
+                "duration_s": 30,
+                "visual_intent": "Intro visuals",
+                "sound_intent": "Intro bed",
+                "complexity": "standard",
+                "keywords": ["test"],
+            },
+            {
+                "scene_id": "scene_02",
+                "order": 2,
+                "purpose": "closing",
+                "narration": "Test scene two narration.",
+                "duration_s": 30,
+                "visual_intent": "Closing visuals",
+                "sound_intent": "Closing bed",
+                "complexity": "standard",
+                "keywords": ["video"],
+            },
+        ],
+        closing_cta=None,
+    )
+    scene_plans = [
+        ScenePlan(
+            scene_id="scene_01",
+            render_mode="stock_video",
+            asset_requests=[],
+            ffmpeg_effects=["cut"],
+            subtitle_text="Test scene one narration.",
+            notes="",
+        ),
+        ScenePlan(
+            scene_id="scene_02",
+            render_mode="stock_video",
+            asset_requests=[],
+            ffmpeg_effects=["cut"],
+            subtitle_text="Test scene two narration.",
+            notes="",
+        ),
+    ]
+    manifest = VideoManifest(
+        video_id="test-video-id",
+        title="Test Video",
+        language="fr",
+        total_duration_s=60,
+        scenes=[
+            TimelineScene(
+                scene_id="scene_01",
+                start_s=0,
+                end_s=30,
+                narration="Test scene one narration.",
+                subtitles="Test scene one narration.",
+                render_mode="stock_video",
+                assets=[
+                    TimelineAsset(
+                        asset_id="scene_01-primary",
+                        path=str(temp_dir / "clip1.mp4"),
+                        source="stock",
+                        start_s=0,
+                        end_s=30,
+                        role="primary_visual",
+                    )
+                ],
+                effects=["cut"],
+                editable_notes="",
+            ),
+            TimelineScene(
+                scene_id="scene_02",
+                start_s=30,
+                end_s=60,
+                narration="Test scene two narration.",
+                subtitles="Test scene two narration.",
+                render_mode="stock_video",
+                assets=[
+                    TimelineAsset(
+                        asset_id="scene_02-primary",
+                        path=str(temp_dir / "clip2.mp4"),
+                        source="stock",
+                        start_s=30,
+                        end_s=60,
+                        role="primary_visual",
+                    )
+                ],
+                effects=["cut"],
+                editable_notes="",
+            ),
+        ],
+        workspace_dir=str(temp_dir),
+    )
+    return brief, script_plan, scene_plans, manifest
 
 
 def test_pipeline_step_enum_values() -> None:
@@ -117,7 +230,6 @@ def test_video_pipeline_initialization(config: AppConfig) -> None:
 
 @patch("auto_video.core.pipeline.LLM")
 @patch("auto_video.core.pipeline.TTS")
-@patch("auto_video.core.pipeline.StockManager")
 @patch("auto_video.core.pipeline.VideoComposer")
 @patch("auto_video.core.pipeline.SubtitleGenerator")
 @patch("auto_video.core.pipeline.ThumbnailGenerator")
@@ -125,7 +237,6 @@ def test_run_with_mocked_providers_returns_success(
     mock_thumbnail_gen: Mock,
     mock_subtitle_gen: Mock,
     mock_composer: Mock,
-    mock_stock_manager: Mock,
     mock_tts: Mock,
     mock_llm: Mock,
     pipeline: VideoPipeline,
@@ -140,13 +251,6 @@ def test_run_with_mocked_providers_returns_success(
     mock_tts_instance.synthesize_script.return_value = 45.0
     mock_tts.return_value = mock_tts_instance
 
-    mock_stock_instance = MagicMock()
-    mock_stock_instance.get_clips_for_script.return_value = [
-        Path("/clip1.mp4"),
-        Path("/clip2.mp4"),
-    ]
-    mock_stock_manager.return_value = mock_stock_instance
-
     mock_composer_instance = MagicMock()
     mock_composer.return_value = mock_composer_instance
 
@@ -159,10 +263,29 @@ def test_run_with_mocked_providers_returns_success(
 
     (temp_dir / "videos").mkdir(parents=True, exist_ok=True)
 
-    with patch(
-        "auto_video.utils.workspace.Workspace.copy_to_output",
-        return_value=Path("/output/video.mp4"),
+    brief, script_plan, scene_plans, manifest = make_orchestration_outputs(temp_dir)
+
+    with (
+        patch("auto_video.core.pipeline.AgentOrchestrator") as mock_orchestrator,
+        patch("auto_video.core.pipeline.AssetPlanner") as mock_asset_planner,
+        patch("auto_video.core.pipeline.AssemblyEngine") as mock_assembly,
+        patch(
+            "auto_video.utils.workspace.Workspace.copy_to_output",
+            return_value=Path("/output/video.mp4"),
+        ),
     ):
+        mock_orchestrator.return_value.prepare_brief.return_value = brief
+        mock_orchestrator.return_value.run_research_if_needed.return_value = None
+        mock_orchestrator.return_value.generate_script.return_value = script_plan
+        review = MagicMock()
+        review.score = 0.95
+        mock_orchestrator.return_value.review_script.return_value = (script_plan, review)
+        mock_orchestrator.return_value.plan_visuals.return_value = scene_plans
+        mock_orchestrator.return_value.build_manifest.return_value = manifest
+        mock_asset_planner.return_value.collect_scene_assets.return_value = {
+            "scene_01": [manifest.scenes[0].assets[0]],
+            "scene_02": [manifest.scenes[1].assets[0]],
+        }
         result = pipeline.run(title="Test Video", duration=60, skip_upload=True)
 
     assert result.status == "success"
@@ -171,19 +294,16 @@ def test_run_with_mocked_providers_returns_success(
     assert result.error is None
 
 
-@patch("auto_video.core.pipeline.LLM")
 def test_run_with_error_returns_failure(
-    mock_llm: Mock,
     pipeline: VideoPipeline,
     temp_dir: Path,
 ) -> None:
-    mock_llm_instance = MagicMock()
-    mock_llm_instance.generate_script.side_effect = Exception("LLM failed")
-    mock_llm.return_value = mock_llm_instance
 
     (temp_dir / "videos").mkdir(parents=True, exist_ok=True)
 
-    result = pipeline.run(title="Test Video", duration=60, skip_upload=True)
+    with patch("auto_video.core.pipeline.AgentOrchestrator") as mock_orchestrator:
+        mock_orchestrator.return_value.prepare_brief.side_effect = Exception("LLM failed")
+        result = pipeline.run(title="Test Video", duration=60, skip_upload=True)
 
     assert result.status == "failed"
     assert result.failed_step == PipelineStep.SCRIPT
@@ -198,10 +318,12 @@ def test_run_creates_workspace(
     with (
         patch("auto_video.core.pipeline.LLM") as mock_llm,
         patch("auto_video.core.pipeline.TTS") as mock_tts,
-        patch("auto_video.core.pipeline.StockManager") as mock_stock,
         patch("auto_video.core.pipeline.VideoComposer") as mock_composer,
         patch("auto_video.core.pipeline.SubtitleGenerator") as mock_subtitle,
         patch("auto_video.core.pipeline.ThumbnailGenerator") as mock_thumbnail,
+        patch("auto_video.core.pipeline.AgentOrchestrator") as mock_orchestrator,
+        patch("auto_video.core.pipeline.AssetPlanner") as mock_asset_planner,
+        patch("auto_video.core.pipeline.AssemblyEngine") as mock_assembly,
         patch(
             "auto_video.utils.workspace.Workspace.copy_to_output",
             return_value=Path("/output/video.mp4"),
@@ -216,17 +338,23 @@ def test_run_creates_workspace(
         mock_tts_instance.synthesize_script.return_value = 30.0
         mock_tts.return_value = mock_tts_instance
 
-        mock_stock_instance = MagicMock()
-        mock_stock_instance.get_clips_for_script.return_value = [
-            Path("/clip1.mp4"),
-            Path("/clip2.mp4"),
-        ]
-        mock_stock.return_value = mock_stock_instance
-
         mock_composer.return_value = MagicMock()
         mock_subtitle.return_value = MagicMock()
         mock_subtitle.return_value.transcribe.return_value = {"segments": []}
         mock_thumbnail.return_value = MagicMock()
+        brief, script_plan, scene_plans, manifest = make_orchestration_outputs(temp_dir)
+        mock_orchestrator.return_value.prepare_brief.return_value = brief
+        mock_orchestrator.return_value.run_research_if_needed.return_value = None
+        mock_orchestrator.return_value.generate_script.return_value = script_plan
+        review = MagicMock()
+        review.score = 0.95
+        mock_orchestrator.return_value.review_script.return_value = (script_plan, review)
+        mock_orchestrator.return_value.plan_visuals.return_value = scene_plans
+        mock_orchestrator.return_value.build_manifest.return_value = manifest
+        mock_asset_planner.return_value.collect_scene_assets.return_value = {
+            "scene_01": [manifest.scenes[0].assets[0]],
+            "scene_02": [manifest.scenes[1].assets[0]],
+        }
 
         (temp_dir / "videos").mkdir(parents=True, exist_ok=True)
 
@@ -245,12 +373,14 @@ def test_run_skips_upload_when_skip_upload_true(
     with (
         patch("auto_video.core.pipeline.LLM") as mock_llm,
         patch("auto_video.core.pipeline.TTS") as mock_tts,
-        patch("auto_video.core.pipeline.StockManager") as mock_stock,
         patch("auto_video.core.pipeline.VideoComposer") as mock_composer,
         patch("auto_video.core.pipeline.SubtitleGenerator") as mock_subtitle,
         patch("auto_video.core.pipeline.YouTubeUploader") as mock_uploader,
         patch("auto_video.core.pipeline.ThumbnailGenerator") as mock_thumbnail,
         patch("auto_video.core.pipeline.Workspace") as mock_workspace,
+        patch("auto_video.core.pipeline.AgentOrchestrator") as mock_orchestrator,
+        patch("auto_video.core.pipeline.AssetPlanner") as mock_asset_planner,
+        patch("auto_video.core.pipeline.AssemblyEngine") as mock_assembly,
     ):
         mock_workspace_instance = MagicMock()
         mock_workspace_instance.video_id = "test-video-id"
@@ -266,17 +396,23 @@ def test_run_skips_upload_when_skip_upload_true(
         mock_tts_instance.synthesize_script.return_value = 30.0
         mock_tts.return_value = mock_tts_instance
 
-        mock_stock_instance = MagicMock()
-        mock_stock_instance.get_clips_for_script.return_value = [
-            Path("/clip1.mp4"),
-            Path("/clip2.mp4"),
-        ]
-        mock_stock.return_value = mock_stock_instance
-
         mock_composer.return_value = MagicMock()
         mock_subtitle.return_value = MagicMock()
         mock_subtitle.return_value.transcribe.return_value = {"segments": []}
         mock_thumbnail.return_value = MagicMock()
+        brief, script_plan, scene_plans, manifest = make_orchestration_outputs(temp_dir)
+        mock_orchestrator.return_value.prepare_brief.return_value = brief
+        mock_orchestrator.return_value.run_research_if_needed.return_value = None
+        mock_orchestrator.return_value.generate_script.return_value = script_plan
+        review = MagicMock()
+        review.score = 0.95
+        mock_orchestrator.return_value.review_script.return_value = (script_plan, review)
+        mock_orchestrator.return_value.plan_visuals.return_value = scene_plans
+        mock_orchestrator.return_value.build_manifest.return_value = manifest
+        mock_asset_planner.return_value.collect_scene_assets.return_value = {
+            "scene_01": [manifest.scenes[0].assets[0]],
+            "scene_02": [manifest.scenes[1].assets[0]],
+        }
 
         (temp_dir / "videos").mkdir(parents=True, exist_ok=True)
 
@@ -343,6 +479,7 @@ def test_resume_continues_from_step(
 
     script_path = workspace_path / "script.txt"
     script_path.write_text("Existing script", encoding="utf-8")
+    (workspace_path / "audio.wav").write_bytes(b"audio")
 
     state_data = {
         "video_id": video_id,
@@ -367,10 +504,12 @@ def test_resume_continues_from_step(
     with (
         patch("auto_video.core.pipeline.LLM") as mock_llm,
         patch("auto_video.core.pipeline.TTS") as mock_tts,
-        patch("auto_video.core.pipeline.StockManager") as mock_stock,
         patch("auto_video.core.pipeline.VideoComposer") as mock_composer,
         patch("auto_video.core.pipeline.SubtitleGenerator") as mock_subtitle,
         patch("auto_video.core.pipeline.ThumbnailGenerator") as mock_thumbnail,
+        patch("auto_video.core.pipeline.AgentOrchestrator") as mock_orchestrator,
+        patch("auto_video.core.pipeline.AssetPlanner") as mock_asset_planner,
+        patch("auto_video.core.pipeline.AssemblyEngine") as mock_assembly,
         patch(
             "auto_video.utils.workspace.Workspace.copy_to_output",
             return_value=Path("/output/video.mp4"),
@@ -385,17 +524,23 @@ def test_resume_continues_from_step(
         mock_tts_instance.synthesize_script.return_value = 30.0
         mock_tts.return_value = mock_tts_instance
 
-        mock_stock_instance = MagicMock()
-        mock_stock_instance.get_clips_for_script.return_value = [
-            Path("/clip1.mp4"),
-            Path("/clip2.mp4"),
-        ]
-        mock_stock.return_value = mock_stock_instance
-
         mock_composer.return_value = MagicMock()
         mock_subtitle.return_value = MagicMock()
         mock_subtitle.return_value.transcribe.return_value = {"segments": []}
         mock_thumbnail.return_value = MagicMock()
+        brief, script_plan, scene_plans, manifest = make_orchestration_outputs(temp_dir)
+        mock_orchestrator.return_value.prepare_brief.return_value = brief
+        mock_orchestrator.return_value.run_research_if_needed.return_value = None
+        mock_orchestrator.return_value.generate_script.return_value = script_plan
+        review = MagicMock()
+        review.score = 0.95
+        mock_orchestrator.return_value.review_script.return_value = (script_plan, review)
+        mock_orchestrator.return_value.plan_visuals.return_value = scene_plans
+        mock_orchestrator.return_value.build_manifest.return_value = manifest
+        mock_asset_planner.return_value.collect_scene_assets.return_value = {
+            "scene_01": [manifest.scenes[0].assets[0]],
+            "scene_02": [manifest.scenes[1].assets[0]],
+        }
 
         result = pipeline.resume(video_id, PipelineStep.AUDIO)
 
@@ -414,6 +559,42 @@ def test_resume_skips_completed_steps(
 
     script_path = workspace_path / "script.txt"
     script_path.write_text("Existing script", encoding="utf-8")
+    (workspace_path / "audio.wav").write_bytes(b"audio")
+    (workspace_path / "brief.json").write_text(
+        VideoBrief(
+            title="Test Title",
+            language="fr",
+            format="long",
+            target_duration_s=180,
+            audience="general",
+            tone="informative",
+            requires_research=False,
+            creative_direction="Legacy test",
+            factual_risk="low",
+        ).model_dump_json(indent=2),
+        encoding="utf-8",
+    )
+    (workspace_path / "script_plan.json").write_text(
+        ScriptPlan(
+            title="Test Title",
+            hook="Hook",
+            scenes=[
+                {
+                    "scene_id": "scene_01",
+                    "order": 1,
+                    "purpose": "content",
+                    "narration": "Existing script",
+                    "duration_s": 30,
+                    "visual_intent": "Visuals",
+                    "sound_intent": "Bed",
+                    "complexity": "standard",
+                    "keywords": ["test"],
+                }
+            ],
+            closing_cta=None,
+        ).model_dump_json(indent=2),
+        encoding="utf-8",
+    )
 
     state_data = {
         "video_id": video_id,
@@ -437,10 +618,13 @@ def test_resume_skips_completed_steps(
 
     with (
         patch("auto_video.core.pipeline.LLM") as mock_llm,
-        patch("auto_video.core.pipeline.StockManager") as mock_stock,
+        patch.object(VideoPipeline, "_get_audio_duration", return_value=30.0),
         patch("auto_video.core.pipeline.VideoComposer") as mock_composer,
         patch("auto_video.core.pipeline.SubtitleGenerator") as mock_subtitle,
         patch("auto_video.core.pipeline.ThumbnailGenerator") as mock_thumbnail,
+        patch("auto_video.core.pipeline.AgentOrchestrator") as mock_orchestrator,
+        patch("auto_video.core.pipeline.AssetPlanner") as mock_asset_planner,
+        patch("auto_video.core.pipeline.AssemblyEngine") as mock_assembly,
         patch(
             "auto_video.utils.workspace.Workspace.copy_to_output",
             return_value=Path("/output/video.mp4"),
@@ -451,17 +635,17 @@ def test_resume_skips_completed_steps(
         mock_llm_instance.generate_script.return_value = "Test script"
         mock_llm.return_value = mock_llm_instance
 
-        mock_stock_instance = MagicMock()
-        mock_stock_instance.get_clips_for_script.return_value = [
-            Path("/clip1.mp4"),
-            Path("/clip2.mp4"),
-        ]
-        mock_stock.return_value = mock_stock_instance
-
         mock_composer.return_value = MagicMock()
         mock_subtitle.return_value = MagicMock()
         mock_subtitle.return_value.transcribe.return_value = {"segments": []}
         mock_thumbnail.return_value = MagicMock()
+        brief, script_plan, scene_plans, manifest = make_orchestration_outputs(temp_dir)
+        mock_orchestrator.return_value.plan_visuals.return_value = scene_plans
+        mock_orchestrator.return_value.build_manifest.return_value = manifest
+        mock_asset_planner.return_value.collect_scene_assets.return_value = {
+            "scene_01": [manifest.scenes[0].assets[0]],
+            "scene_02": [manifest.scenes[1].assets[0]],
+        }
 
         result = pipeline.resume(video_id, PipelineStep.VISUALS)
 
@@ -620,17 +804,21 @@ def test_get_audio_duration_returns_zero_on_timeout(
 
 @patch("auto_video.core.pipeline.LLM")
 @patch("auto_video.core.pipeline.TTS")
-@patch("auto_video.core.pipeline.StockManager")
 @patch("auto_video.core.pipeline.VideoComposer")
 @patch("auto_video.core.pipeline.SubtitleGenerator")
 @patch("auto_video.core.pipeline.ThumbnailGenerator")
 @patch("auto_video.core.pipeline.Workspace")
+@patch("auto_video.core.pipeline.AgentOrchestrator")
+@patch("auto_video.core.pipeline.AssetPlanner")
+@patch("auto_video.core.pipeline.AssemblyEngine")
 def test_pipeline_with_stock_visuals_mode(
+    mock_assembly: Mock,
+    mock_asset_planner: Mock,
+    mock_orchestrator: Mock,
     mock_workspace: Mock,
     mock_thumbnail_gen: Mock,
     mock_subtitle_gen: Mock,
     mock_composer: Mock,
-    mock_stock_manager: Mock,
     mock_tts: Mock,
     mock_llm: Mock,
     temp_dir: Path,
@@ -663,17 +851,23 @@ def test_pipeline_with_stock_visuals_mode(
     mock_tts_instance.synthesize_script.return_value = 30.0
     mock_tts.return_value = mock_tts_instance
 
-    mock_stock_instance = MagicMock()
-    mock_stock_instance.get_clips_for_script.return_value = [
-        Path("/stock1.mp4"),
-        Path("/stock2.mp4"),
-    ]
-    mock_stock_manager.return_value = mock_stock_instance
-
     mock_composer.return_value = MagicMock()
     mock_subtitle_gen.return_value = MagicMock()
     mock_subtitle_gen.return_value.transcribe.return_value = {"segments": []}
     mock_thumbnail_gen.return_value = MagicMock()
+    _, script_plan, scene_plans, manifest = make_orchestration_outputs(temp_dir)
+    mock_orchestrator.return_value.prepare_brief.return_value = make_orchestration_outputs(temp_dir)[0]
+    mock_orchestrator.return_value.run_research_if_needed.return_value = None
+    mock_orchestrator.return_value.generate_script.return_value = script_plan
+    review = MagicMock()
+    review.score = 0.9
+    mock_orchestrator.return_value.review_script.return_value = (script_plan, review)
+    mock_orchestrator.return_value.plan_visuals.return_value = scene_plans
+    mock_orchestrator.return_value.build_manifest.return_value = manifest
+    mock_asset_planner.return_value.collect_scene_assets.return_value = {
+        "scene_01": [manifest.scenes[0].assets[0]],
+        "scene_02": [manifest.scenes[1].assets[0]],
+    }
 
     (temp_dir / "videos").mkdir(parents=True, exist_ok=True)
     (temp_dir / "temp").mkdir(parents=True, exist_ok=True)
@@ -681,22 +875,26 @@ def test_pipeline_with_stock_visuals_mode(
     result = pipeline.run(title="Stock Test", duration=60, skip_upload=True)
 
     assert result.status == "success"
-    mock_stock_instance.get_clips_for_script.assert_called_once()
+    mock_asset_planner.return_value.collect_scene_assets.assert_called_once()
 
 
 @patch("auto_video.core.pipeline.LLM")
 @patch("auto_video.core.pipeline.TTS")
-@patch("auto_video.core.pipeline.LocalAssetsManager")
 @patch("auto_video.core.pipeline.VideoComposer")
 @patch("auto_video.core.pipeline.SubtitleGenerator")
 @patch("auto_video.core.pipeline.ThumbnailGenerator")
 @patch("auto_video.core.pipeline.Workspace")
+@patch("auto_video.core.pipeline.AgentOrchestrator")
+@patch("auto_video.core.pipeline.AssetPlanner")
+@patch("auto_video.core.pipeline.AssemblyEngine")
 def test_pipeline_with_local_visuals_mode(
+    mock_assembly: Mock,
+    mock_asset_planner: Mock,
+    mock_orchestrator: Mock,
     mock_workspace: Mock,
     mock_thumbnail_gen: Mock,
     mock_subtitle_gen: Mock,
     mock_composer: Mock,
-    mock_local_manager: Mock,
     mock_tts: Mock,
     mock_llm: Mock,
     temp_dir: Path,
@@ -732,21 +930,23 @@ def test_pipeline_with_local_visuals_mode(
     mock_tts_instance.synthesize_script.return_value = 30.0
     mock_tts.return_value = mock_tts_instance
 
-    mock_local_instance = MagicMock()
-    mock_local_instance.get_random_sequence.return_value = [
-        {"path": Path("/local1.mp4"), "duration": 10.0},
-        {"path": Path("/local2.mp4"), "duration": 20.0},
-    ]
-    mock_local_instance.prepare_clips.return_value = [
-        Path("/local1.mp4"),
-        Path("/local2.mp4"),
-    ]
-    mock_local_manager.return_value = mock_local_instance
-
     mock_composer.return_value = MagicMock()
     mock_subtitle_gen.return_value = MagicMock()
     mock_subtitle_gen.return_value.transcribe.return_value = {"segments": []}
     mock_thumbnail_gen.return_value = MagicMock()
+    brief, script_plan, scene_plans, manifest = make_orchestration_outputs(temp_dir)
+    mock_orchestrator.return_value.prepare_brief.return_value = brief
+    mock_orchestrator.return_value.run_research_if_needed.return_value = None
+    mock_orchestrator.return_value.generate_script.return_value = script_plan
+    review = MagicMock()
+    review.score = 0.9
+    mock_orchestrator.return_value.review_script.return_value = (script_plan, review)
+    mock_orchestrator.return_value.plan_visuals.return_value = scene_plans
+    mock_orchestrator.return_value.build_manifest.return_value = manifest
+    mock_asset_planner.return_value.collect_scene_assets.return_value = {
+        "scene_01": [manifest.scenes[0].assets[0]],
+        "scene_02": [manifest.scenes[1].assets[0]],
+    }
 
     (temp_dir / "videos").mkdir(parents=True, exist_ok=True)
     (temp_dir / "temp").mkdir(parents=True, exist_ok=True)
@@ -754,25 +954,26 @@ def test_pipeline_with_local_visuals_mode(
     result = pipeline.run(title="Local Test", duration=60, skip_upload=True)
 
     assert result.status == "success"
-    mock_local_instance.get_random_sequence.assert_called_once()
-    mock_local_instance.prepare_clips.assert_called_once()
+    mock_asset_planner.return_value.collect_scene_assets.assert_called_once()
 
 
 @patch("auto_video.core.pipeline.LLM")
 @patch("auto_video.core.pipeline.TTS")
-@patch("auto_video.core.pipeline.StockManager")
-@patch("auto_video.core.pipeline.LocalAssetsManager")
 @patch("auto_video.core.pipeline.VideoComposer")
 @patch("auto_video.core.pipeline.SubtitleGenerator")
 @patch("auto_video.core.pipeline.ThumbnailGenerator")
 @patch("auto_video.core.pipeline.Workspace")
+@patch("auto_video.core.pipeline.AgentOrchestrator")
+@patch("auto_video.core.pipeline.AssetPlanner")
+@patch("auto_video.core.pipeline.AssemblyEngine")
 def test_pipeline_with_hybrid_visuals_mode(
+    mock_assembly: Mock,
+    mock_asset_planner: Mock,
+    mock_orchestrator: Mock,
     mock_workspace: Mock,
     mock_thumbnail_gen: Mock,
     mock_subtitle_gen: Mock,
     mock_composer: Mock,
-    mock_local_manager: Mock,
-    mock_stock_manager: Mock,
     mock_tts: Mock,
     mock_llm: Mock,
     temp_dir: Path,
@@ -812,28 +1013,23 @@ def test_pipeline_with_hybrid_visuals_mode(
     mock_tts_instance.synthesize_script.return_value = 60.0
     mock_tts.return_value = mock_tts_instance
 
-    mock_stock_instance = MagicMock()
-    mock_stock_instance.get_clips_for_script.return_value = [
-        Path("/stock1.mp4"),
-        Path("/stock2.mp4"),
-    ]
-    mock_stock_manager.return_value = mock_stock_instance
-
-    mock_local_instance = MagicMock()
-    mock_local_instance.get_random_sequence.return_value = [
-        {"path": Path("/local1.mp4"), "duration": 15.0},
-        {"path": Path("/local2.mp4"), "duration": 15.0},
-    ]
-    mock_local_instance.prepare_clips.return_value = [
-        Path("/local1.mp4"),
-        Path("/local2.mp4"),
-    ]
-    mock_local_manager.return_value = mock_local_instance
-
     mock_composer.return_value = MagicMock()
     mock_subtitle_gen.return_value = MagicMock()
     mock_subtitle_gen.return_value.transcribe.return_value = {"segments": []}
     mock_thumbnail_gen.return_value = MagicMock()
+    brief, script_plan, scene_plans, manifest = make_orchestration_outputs(temp_dir)
+    mock_orchestrator.return_value.prepare_brief.return_value = brief
+    mock_orchestrator.return_value.run_research_if_needed.return_value = None
+    mock_orchestrator.return_value.generate_script.return_value = script_plan
+    review = MagicMock()
+    review.score = 0.9
+    mock_orchestrator.return_value.review_script.return_value = (script_plan, review)
+    mock_orchestrator.return_value.plan_visuals.return_value = scene_plans
+    mock_orchestrator.return_value.build_manifest.return_value = manifest
+    mock_asset_planner.return_value.collect_scene_assets.return_value = {
+        "scene_01": [manifest.scenes[0].assets[0]],
+        "scene_02": [manifest.scenes[1].assets[0]],
+    }
 
     (temp_dir / "videos").mkdir(parents=True, exist_ok=True)
     (temp_dir / "temp").mkdir(parents=True, exist_ok=True)
@@ -841,8 +1037,7 @@ def test_pipeline_with_hybrid_visuals_mode(
     result = pipeline.run(title="Hybrid Test", duration=60, skip_upload=True)
 
     assert result.status == "success"
-    mock_stock_instance.get_clips_for_script.assert_called_once()
-    mock_local_instance.get_random_sequence.assert_called_once()
+    mock_asset_planner.return_value.collect_scene_assets.assert_called_once()
 
 
 def test_pipeline_progress_initialization() -> None:

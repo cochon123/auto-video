@@ -1,6 +1,7 @@
 """TTS core module."""
 
 import logging
+import struct
 from abc import ABC, abstractmethod
 from pathlib import Path
 
@@ -35,10 +36,47 @@ class MockTTSProvider(TTSProvider):
         self.config = config
 
     def synthesize(self, text: str, output_path: Path, voice: str) -> float:
+        """Create a minimal valid WAV file for testing."""
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_bytes(b"MOCK_AUDIO_DATA")
+
+        # Calculate duration (0.3 seconds per word)
         words = len(text.split())
         duration = words * 0.3
+
+        # Create a minimal valid WAV file (PCM 16-bit, mono, 22050 Hz)
+        sample_rate = 22050
+        num_samples = int(duration * sample_rate)
+
+        # WAV header (44 bytes)
+        # RIFF header
+        riff = b"RIFF"
+        chunk_size = struct.pack("<I", 36 + num_samples * 2)
+        wave = b"WAVE"
+
+        # fmt subchunk
+        fmt = b"fmt "
+        fmt_chunk_size = struct.pack("<I", 16)
+        audio_format = struct.pack("<H", 1)  # PCM
+        num_channels = struct.pack("<H", 1)  # Mono
+        byte_rate = struct.pack("<I", sample_rate * 2)
+        block_align = struct.pack("<H", 2)
+        bits_per_sample = struct.pack("<H", 16)
+
+        # data subchunk
+        data = b"data"
+        data_size = struct.pack("<I", num_samples * 2)
+
+        # Generate silence (zeros)
+        audio_data = b"\x00\x00" * num_samples
+
+        # Write WAV file
+        with open(output_path, "wb") as f:
+            f.write(riff + chunk_size + wave)
+            f.write(fmt + fmt_chunk_size + audio_format + num_channels)
+            f.write(struct.pack("<I", sample_rate) + byte_rate + block_align + bits_per_sample)
+            f.write(data + data_size)
+            f.write(audio_data)
+
         return duration
 
     def health_check(self) -> bool:

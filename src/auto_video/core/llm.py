@@ -2,6 +2,7 @@
 
 import logging
 import re
+from importlib import resources
 from pathlib import Path
 
 from auto_video.config.schema import LLMProviderConfig
@@ -12,7 +13,9 @@ from auto_video.providers.llm import create_provider
 
 __all__ = ["LLM", "LLMProvider", "MockLLMProvider", "load_prompt", "clean_markdown"]
 
-PROMPTS_DIR = Path(__file__).parent.parent.parent.parent / "prompts"
+PROMPTS_PACKAGE = "auto_video"
+# Backwards-compatible fallback for editable installs and tests that patch this path.
+PROMPTS_DIR = Path(__file__).resolve().parents[3] / "prompts"
 
 
 def clean_markdown(text: str) -> str:
@@ -64,10 +67,23 @@ def clean_markdown(text: str) -> str:
 
 
 def load_prompt(filename: str, **variables: str) -> str:
-    prompt_path = PROMPTS_DIR / filename
-    if not prompt_path.exists():
-        raise FileNotFoundError(f"Prompt file not found: {prompt_path}")
-    content = prompt_path.read_text(encoding="utf-8").strip()
+    content = None
+
+    try:
+        prompt_path = resources.files(PROMPTS_PACKAGE).joinpath("prompts", filename)
+        if prompt_path.is_file():
+            content = prompt_path.read_text(encoding="utf-8").strip()
+    except (FileNotFoundError, ModuleNotFoundError, AttributeError):
+        content = None
+
+    if content is None:
+        prompt_path = PROMPTS_DIR / filename
+        if not prompt_path.exists():
+            raise FileNotFoundError(
+                f"Prompt file not found: {filename} in {PROMPTS_PACKAGE} or {prompt_path}"
+            )
+        content = prompt_path.read_text(encoding="utf-8").strip()
+
     for key, value in variables.items():
         content = content.replace(f"{{{key}}}", str(value))
     return content

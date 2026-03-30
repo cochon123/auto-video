@@ -2,6 +2,7 @@
 
 import logging
 import random
+import shutil
 import subprocess
 import tempfile
 from abc import ABC, abstractmethod
@@ -466,12 +467,15 @@ class VideoComposer:
                 target_duration,
             )
             if video_path != output_path:
-                import shutil
-
                 shutil.copy2(video_path, output_path)
             return
 
         logger.info("[VideoComposer] Trimming video from %.2fs to %.2fs", video_duration, target_duration)
+
+        final_output = output_path
+        temp_output = output_path
+        if video_path == output_path:
+            temp_output = output_path.with_name(f"{output_path.stem}.trimmed{output_path.suffix}")
 
         subprocess.run(
             [
@@ -487,12 +491,15 @@ class VideoComposer:
                 "copy",
                 "-avoid_negative_ts",
                 "make_zero",
-                str(output_path),
+                str(temp_output),
             ],
             capture_output=True,
             check=True,
             timeout=600,
         )
+
+        if temp_output != final_output:
+            shutil.move(str(temp_output), str(final_output))
 
         logger.info("[VideoComposer] ✓ Video trimmed to %.2fs", target_duration)
 
@@ -671,6 +678,478 @@ class VideoComposer:
         except (subprocess.TimeoutExpired, ValueError, FileNotFoundError):
             pass
         return 0, 0
+
+    # ==================== NEW ENHANCED METHODS ====================
+
+    def create_ken_burns_effect(
+        self,
+        image_path: Path,
+        output_path: Path,
+        effect_type: str = "zoom_in",
+        duration: float = 4.0,
+        zoom_level: float = 1.5
+    ) -> None:
+        """Create a Ken Burns effect with several pan/zoom variants."""
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        scaled_path = output_path.parent / f"{output_path.stem}_scaled.jpg"
+        clamped_zoom = max(1.05, min(zoom_level, 2.0))
+        total_frames = max(int(duration * 30), 1)
+
+        zoom_expr = "1.0"
+        x_expr = "iw/2-(iw/zoom/2)"
+        y_expr = "ih/2-(ih/zoom/2)"
+
+        if effect_type == "zoom_in":
+            zoom_expr = f"min(zoom+0.0015*{clamped_zoom:.2f}, {clamped_zoom:.2f})"
+        elif effect_type == "zoom_out":
+            zoom_expr = f"if(eq(on,1),{clamped_zoom:.2f},max(zoom-0.0015,1.0))"
+        elif effect_type == "pan_left":
+            zoom_expr = "1.1"
+            x_expr = f"(iw-iw/zoom)*(1-on/{total_frames})"
+        elif effect_type == "pan_right":
+            zoom_expr = "1.1"
+            x_expr = f"(iw-iw/zoom)*(on/{total_frames})"
+        elif effect_type == "diagonal":
+            zoom_expr = f"min(zoom+0.0012*{clamped_zoom:.2f}, {clamped_zoom:.2f})"
+            x_expr = f"(iw-iw/zoom)*(on/{total_frames})"
+            y_expr = f"(ih-ih/zoom)*(on/{total_frames})"
+
+        subprocess.run(
+            [
+                self.ffmpeg_path,
+                "-y",
+                "-i",
+                str(image_path),
+                "-vf",
+                "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2",
+                "-qscale:v",
+                "2",
+                str(scaled_path),
+            ],
+            capture_output=True,
+            check=True,
+            timeout=30,
+        )
+
+        subprocess.run(
+            [
+                self.ffmpeg_path,
+                "-y",
+                "-loop",
+                "1",
+                "-i",
+                str(scaled_path),
+                "-vf",
+                f"zoompan=z='{zoom_expr}':x='{x_expr}':y='{y_expr}':d=1:s=1920x1080:fps=30",
+                "-c:v",
+                "libx264",
+                "-preset",
+                "fast",
+                "-crf",
+                "23",
+                "-t",
+                str(duration),
+                "-pix_fmt",
+                "yuv420p",
+                "-r",
+                "30",
+                "-movflags",
+                "+faststart",
+                str(output_path),
+            ],
+            capture_output=True,
+            check=True,
+            timeout=120,
+        )
+        scaled_path.unlink(missing_ok=True)
+
+    def apply_transition(
+        self,
+        clip1_path: Path,
+        clip2_path: Path,
+        output_path: Path,
+        transition_type: str = "fade",
+        duration: float = 1.0
+    ) -> None:
+        """
+        Apply a transition between two clips.
+
+        Args:
+            clip1_path: First clip
+            clip2_path: Second clip
+            output_path: Output video
+            transition_type: fade, dissolve, wipeleft, wiperight, etc.
+            duration: Transition duration
+        """
+        # Get duration of first clip
+        try:
+            result = subprocess.run(
+                [self.ffprobe_path, "-v", "error", "-show_entries",
+                 "format=duration", "-of", "default=noprint_wrappers=1:nokey=1",
+                 str(clip1_path)],
+                capture_output=True, text=True, timeout=10
+            )
+            clip1_duration = float(result.stdout.strip())
+            offset = max(0, clip1_duration - duration)
+        except (subprocess.TimeoutExpired, ValueError, FileNotFoundError):
+            offset = duration
+
+        filter_complex = (
+            f"[0:v][1:v]xfade=transition={transition_type}:duration={duration}:offset={offset}[vout];"
+            f"[0:a][1:a]acrossfade=d={duration}[aout]"
+        )
+        try:
+            subprocess.run(
+                [
+                    self.ffmpeg_path,
+                    "-y",
+                    "-i",
+                    str(clip1_path),
+                    "-i",
+                    str(clip2_path),
+                    "-filter_complex",
+                    filter_complex,
+                    "-map",
+                    "[vout]",
+                    "-map",
+                    "[aout]",
+                    "-c:v",
+                    "libx264",
+                    "-preset",
+                    "fast",
+                    "-crf",
+                    "23",
+                    "-pix_fmt",
+                    "yuv420p",
+                    "-c:a",
+                    "aac",
+                    str(output_path),
+                ],
+                capture_output=True,
+                check=True,
+                timeout=120,
+            )
+        except subprocess.CalledProcessError:
+            subprocess.run(
+                [
+                    self.ffmpeg_path,
+                    "-y",
+                    "-i",
+                    str(clip1_path),
+                    "-i",
+                    str(clip2_path),
+                    "-filter_complex",
+                    f"[0:v][1:v]xfade=transition={transition_type}:duration={duration}:offset={offset}[vout]",
+                    "-map",
+                    "[vout]",
+                    "-c:v",
+                    "libx264",
+                    "-preset",
+                    "fast",
+                    "-crf",
+                    "23",
+                    "-pix_fmt",
+                    "yuv420p",
+                    str(output_path),
+                ],
+                capture_output=True,
+                check=True,
+                timeout=120,
+            )
+
+    def add_animated_text(
+        self,
+        video_path: Path,
+        text: str,
+        output_path: Path,
+        position: str = "bottom",
+        animation: str = "fade_in_out"
+    ) -> None:
+        """
+        Add animated text to a video.
+
+        Args:
+            video_path: Source video
+            text: Text to display
+            output_path: Output video
+            position: top, bottom, center
+            animation: fade_in_out, slide_up
+        """
+        position_map = {
+            "top": "50",
+            "bottom": "h-th-50",
+            "center": "(h-th)/2"
+        }
+
+        clip_duration = self.get_duration(video_path) or 4.0
+        fade_window = min(1.0, max(0.3, clip_duration * 0.15))
+        safe_text = (
+            text.replace("\\", "\\\\")
+            .replace(":", "\\:")
+            .replace("'", r"\'")
+            .replace("%", r"\%")
+            .replace("\n", " ")
+        )
+        alpha_expr = (
+            f"alpha='if(lt(t,{fade_window:.2f}),t/{fade_window:.2f},"
+            f"if(gt(t,{max(clip_duration - fade_window, 0.0):.2f}),"
+            f"({clip_duration:.2f}-t)/{fade_window:.2f},1))'"
+        )
+
+        subprocess.run(
+            [
+                self.ffmpeg_path, "-y",
+                "-i", str(video_path),
+                "-vf",
+                f"drawtext=text='{safe_text}':fontsize=48:fontcolor=white:"
+                f"x=(w-tw)/2:y={position_map.get(position, position_map['bottom'])}:"
+                f"{alpha_expr}:box=1:boxcolor=black@0.5:boxborderw=5",
+                "-c:v", "libx264",
+                "-preset", "fast",
+                "-crf", "23",
+                "-pix_fmt", "yuv420p",
+                "-c:a", "copy",
+                str(output_path)
+            ],
+            capture_output=True,
+            check=True,
+            timeout=120
+        )
+
+    def mix_audio_tracks(
+        self,
+        video_path: Path,
+        voiceover_path: Path,
+        music_path: Path | None = None,
+        sound_effects: list[tuple[Path, float]] | None = None,
+        output_path: Path | None = None,
+        music_volume: float = 0.3,
+        voice_volume: float = 1.0
+    ) -> Path:
+        """
+        Mix multiple audio tracks together.
+
+        Args:
+            video_path: Video with original audio
+            voiceover_path: Voiceover file
+            music_path: (optional) Background music
+            sound_effects: (optional) List of (path, start_time)
+            output_path: Output video path (defaults to video_path)
+            music_volume: Music volume (0.0 to 1.0)
+            voice_volume: Voiceover volume (0.0 to 1.0)
+
+        Returns:
+            Path to output video
+        """
+        if output_path is None:
+            output_path = video_path
+
+        inputs = ["-i", str(video_path), "-i", str(voiceover_path)]
+        filter_parts: list[str] = []
+        mix_inputs: list[str] = []
+
+        if self._has_audio_stream(video_path):
+            filter_parts.append("[0:a]volume=0.15[video_audio]")
+            mix_inputs.append("[video_audio]")
+        filter_parts.extend(
+            [
+            f"[1:a]volume={voice_volume}[voice]"
+            ]
+        )
+        mix_inputs.append("[voice]")
+
+        input_idx = 2
+
+        # Add music
+        if music_path:
+            inputs.extend(["-i", str(music_path)])
+            filter_parts.append(
+                f"[{input_idx}:a]volume={music_volume},"
+                f"aloop=loop=-1:size=2e+09[music]"
+            )
+            mix_inputs.append("[music]")
+            input_idx += 1
+
+        # Add sound effects
+        sfx_inputs = []
+        if sound_effects:
+            for sfx_path, start_time in sound_effects:
+                inputs.extend(["-i", str(sfx_path)])
+                delay_ms = int(start_time * 1000)
+                filter_parts.append(
+                    f"[{input_idx}:a]adelay={delay_ms}|{delay_ms}[sfx{input_idx}]"
+                )
+                sfx_inputs.append(f"[sfx{input_idx}]")
+                input_idx += 1
+
+        # Mix all tracks
+        all_inputs = "".join(mix_inputs) + "".join(sfx_inputs)
+        num_tracks = len(mix_inputs) + len(sfx_inputs or [])
+        filter_parts.append(
+            f"{all_inputs}amix=inputs={num_tracks}:duration=first[outa]"
+        )
+
+        subprocess.run(
+            [
+                self.ffmpeg_path, "-y",
+                *inputs,
+                "-filter_complex", ";".join(filter_parts),
+                "-map", "0:v",
+                "-map", "[outa]",
+                "-c:v", "copy",
+                "-c:a", "aac",
+                "-shortest",
+                str(output_path)
+            ],
+            capture_output=True,
+            check=True,
+            timeout=600
+        )
+
+        return output_path
+
+    def concatenate_with_transitions(
+        self,
+        clips: list[Path],
+        output: Path,
+        total_duration: float,
+        transition_duration: float = 1.0,
+        transition_type: str = "fade"
+    ) -> None:
+        """
+        Concatenate clips with transitions between them.
+
+        Args:
+            clips: List of clip paths
+            output: Output video path
+            total_duration: Total target duration
+            transition_duration: Duration of each transition
+            transition_type: Type of transition
+        """
+        if len(clips) < 2:
+            # Single clip, just copy
+            shutil.copy(clips[0], output)
+            final_duration = self.get_duration(output)
+            if final_duration < total_duration:
+                self.extend_video_to_duration(output, output, total_duration)
+            return
+
+        temp_dir = output.parent / "transition_concat"
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        current_output = clips[0]
+        intermediates: list[Path] = []
+
+        try:
+            for index, next_clip in enumerate(clips[1:], start=1):
+                merged = temp_dir / f"transition_{index:03d}.mp4"
+                self.apply_transition(
+                    current_output,
+                    next_clip,
+                    merged,
+                    transition_type=transition_type,
+                    duration=transition_duration,
+                )
+                intermediates.append(merged)
+                current_output = merged
+
+            final_duration = self.get_duration(current_output)
+            if final_duration > total_duration:
+                self.trim_video_to_duration(current_output, output, total_duration)
+            elif final_duration < total_duration:
+                self.extend_video_to_duration(current_output, output, total_duration)
+            else:
+                shutil.copy2(current_output, output)
+        except Exception:
+            concat_file = output.parent / "concat_fallback.txt"
+            with open(concat_file, "w") as f:
+                for clip in clips:
+                    f.write(f"file '{clip.absolute()}'\n")
+
+            subprocess.run(
+                [
+                    self.ffmpeg_path,
+                    "-y",
+                    "-f",
+                    "concat",
+                    "-safe",
+                    "0",
+                    "-i",
+                    str(concat_file),
+                    "-c",
+                    "copy",
+                    str(output),
+                ],
+                capture_output=True,
+                check=True,
+                timeout=600,
+            )
+            final_duration = self.get_duration(output)
+            if final_duration < total_duration:
+                self.extend_video_to_duration(output, output, total_duration)
+
+    def extend_video_to_duration(self, input_path: Path, output_path: Path, target_duration: float) -> Path:
+        """Freeze the last frame so a clip reaches the requested duration."""
+        current_duration = self.get_duration(input_path)
+        if current_duration >= target_duration:
+            if input_path != output_path:
+                shutil.copy2(input_path, output_path)
+            return output_path
+
+        pad_duration = max(target_duration - current_duration, 0.0)
+        temp_output = output_path
+        if input_path == output_path:
+            temp_output = output_path.with_name(f"{output_path.stem}_padded{output_path.suffix}")
+
+        subprocess.run(
+            [
+                self.ffmpeg_path,
+                "-y",
+                "-i",
+                str(input_path),
+                "-vf",
+                f"tpad=stop_mode=clone:stop_duration={pad_duration:.3f}",
+                "-c:v",
+                "libx264",
+                "-preset",
+                "fast",
+                "-crf",
+                "23",
+                "-pix_fmt",
+                "yuv420p",
+                "-an",
+                str(temp_output),
+            ],
+            capture_output=True,
+            check=True,
+            timeout=300,
+        )
+
+        if temp_output != output_path:
+            shutil.move(temp_output, output_path)
+        return output_path
+
+    def _has_audio_stream(self, video_path: Path) -> bool:
+        try:
+            result = subprocess.run(
+                [
+                    self.ffprobe_path,
+                    "-v",
+                    "error",
+                    "-select_streams",
+                    "a:0",
+                    "-show_entries",
+                    "stream=codec_type",
+                    "-of",
+                    "default=noprint_wrappers=1:nokey=1",
+                    str(video_path),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            return result.returncode == 0 and result.stdout.strip() == "audio"
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            return False
 
 
 __all__ = ["VideoResult", "StockProvider", "Asset", "LocalAssetsManager", "VideoComposer"]

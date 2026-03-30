@@ -4,6 +4,7 @@ import logging
 import logging.handlers
 import sys
 import time
+import warnings
 from pathlib import Path
 from typing import Any
 
@@ -180,6 +181,17 @@ def setup_logging(verbose: bool = False, log_file: Path | None = None) -> None:
     logging.getLogger("httpcore").setLevel(logging.WARNING)
     logging.getLogger("openai").setLevel(logging.WARNING)
     logging.getLogger("anthropic").setLevel(logging.WARNING)
+    logging.getLogger("duckduckgo_search").setLevel(logging.WARNING)
+    logging.getLogger("primp").setLevel(logging.WARNING)
+    logging.getLogger("hyper_util").setLevel(logging.WARNING)
+    logging.getLogger("h2").setLevel(logging.WARNING)
+    logging.getLogger("rustls").setLevel(logging.WARNING)
+    logging.getLogger("phonemizer").setLevel(logging.WARNING)
+    warnings.filterwarnings(
+        "ignore",
+        message=r"This package \(`duckduckgo_search`\) has been renamed to `ddgs`!.*",
+        category=RuntimeWarning,
+    )
 
     # Completely disable onnxruntime warnings by adding a NullHandler
     # This prevents onnxruntime's own warnings from appearing

@@ -1,0 +1,399 @@
+"""
+Tests for auto-video agents.
+
+Tests the multi-agent system including Director, Scriptwriter,
+Visual Curator, and Reviewer agents.
+"""
+
+import pytest
+from pathlib import Path
+
+from auto_video.agents.director import DirectorAgent
+from auto_video.agents.scriptwriter import ScriptwriterAgent
+from auto_video.agents.visual_curator import VisualCuratorAgent
+from auto_video.agents.reviewer import ReviewerAgent
+
+
+# Mock LLM provider for testing
+class MockLLMProvider:
+    """Mock LLM provider for testing."""
+
+    def generate(self, prompt: str) -> str:
+        """Return a mock response."""
+        return '''
+        {
+            "title": "Test Video Title",
+            "scenes": [
+                {
+                    "scene_number": 1,
+                    "type": "intro",
+                    "narration": "Welcome to this amazing video about our topic. Did you know that learning is fun?",
+                    "visual_cues": "Show engaging intro graphics",
+                    "duration": 30,
+                    "keywords": ["intro", "welcome", "start"],
+                    "requires_complex_motion": true
+                },
+                {
+                    "scene_number": 2,
+                    "type": "content",
+                    "narration": "Let's dive deeper into the subject matter with interesting facts and details.",
+                    "visual_cues": "Show relevant imagery and footage",
+                    "duration": 60,
+                    "keywords": ["content", "details", "information"],
+                    "requires_complex_motion": false
+                },
+                {
+                    "scene_number": 3,
+                    "type": "outro",
+                    "narration": "Thanks for watching! Don't forget to like and subscribe for more content.",
+                    "visual_cues": "Show outro with call to action",
+                    "duration": 15,
+                    "keywords": ["outro", "thanks", "subscribe"],
+                    "requires_complex_motion": true
+                }
+            ]
+        }
+        '''
+
+
+@pytest.fixture
+def mock_llm():
+    """Create a mock LLM provider."""
+    return MockLLMProvider()
+
+
+class TestDirectorAgent:
+    """Test Director agent functionality."""
+
+    def test_agent_creation(self, mock_llm):
+        """Test Director agent can be created."""
+        director = DirectorAgent(mock_llm)
+        assert director.role == "Video Director"
+        assert director.goal
+
+    def test_plan_video_structure(self, mock_llm):
+        """Test video structure planning."""
+        director = DirectorAgent(mock_llm)
+
+        structure = director.plan_video_structure(
+            topic="Test Topic",
+            duration=180,  # 3 minutes
+            format="long"
+        )
+
+        assert "segments" in structure
+        assert "tone" in structure
+        assert "target_audience" in structure
+        assert len(structure["segments"]) >= 3
+
+        # Check that intro and outro are marked for complex motion
+        assert "intro" in structure["required_complex_segments"]
+
+    def test_analyze_complexity_requirements(self, mock_llm):
+        """Test complexity analysis for scenes."""
+        director = DirectorAgent(mock_llm)
+
+        # Simple scene
+        simple_scene = {
+            "type": "content",
+            "visual_cues": "Show a forest",
+            "requires_complex_motion": False
+        }
+
+        assert not director.analyze_complexity_requirements(
+            simple_scene, {}
+        )
+
+        # Complex scene (intro)
+        intro_scene = {
+            "type": "intro",
+            "visual_cues": "Animated intro",
+            "requires_complex_motion": False
+        }
+
+        assert director.analyze_complexity_requirements(
+            intro_scene, {}
+        )
+
+        # Complex scene (data viz)
+        data_scene = {
+            "type": "content",
+            "visual_cues": "Show data viz graph",
+            "requires_complex_motion": False
+        }
+
+        assert director.analyze_complexity_requirements(
+            data_scene, {}
+        )
+
+
+class TestScriptwriterAgent:
+    """Test Scriptwriter agent functionality."""
+
+    def test_agent_creation(self, mock_llm):
+        """Test Scriptwriter agent can be created."""
+        writer = ScriptwriterAgent(mock_llm)
+        assert writer.role == "Video Scriptwriter"
+        assert writer.goal
+
+    def test_write_script(self, mock_llm):
+        """Test script generation."""
+        writer = ScriptwriterAgent(mock_llm)
+
+        structure = {
+            "segments": [
+                {"type": "intro", "estimated_duration": 30},
+                {"type": "content", "estimated_duration": 60},
+                {"type": "outro", "estimated_duration": 15}
+            ],
+            "tone": "informative"
+        }
+
+        script = writer.write_script(
+            topic="Climate Change",
+            structure=structure,
+            tone="informative",
+            language="en"
+        )
+
+        assert "title" in script
+        assert "scenes" in script
+        assert len(script["scenes"]) == 3
+
+        # Check first scene has required fields
+        first_scene = script["scenes"][0]
+        assert "narration" in first_scene
+        assert "visual_cues" in first_scene
+        assert "duration" in first_scene
+        assert "keywords" in first_scene
+
+    def test_revise_script(self, mock_llm):
+        """Test script revision."""
+        writer = ScriptwriterAgent(mock_llm)
+
+        script = {
+            "title": "Test",
+            "scenes": [
+                {
+                    "scene_number": 1,
+                    "narration": "This is the original narration.",
+                    "duration": 30
+                }
+            ]
+        }
+
+        feedback = {
+            "revision_requests": ["Add a stronger hook"]
+        }
+
+        revised = writer.revise_script(script, feedback)
+
+        # Check that hook was added
+        assert "Did you know" in revised["scenes"][0]["narration"]
+
+
+class TestVisualCuratorAgent:
+    """Test Visual Curator agent functionality."""
+
+    def test_agent_creation(self, mock_llm):
+        """Test Visual Curator agent can be created."""
+        curator = VisualCuratorAgent(mock_llm)
+        assert curator.role == "Visual Content Curator"
+        assert curator.goal
+
+    def test_plan_simple_scene_ffmpeg(self, mock_llm):
+        """Test that simple scenes use FFmpeg."""
+        curator = VisualCuratorAgent(mock_llm)
+
+        simple_scene = {
+            "scene_number": 1,
+            "type": "content",
+            "visual_cues": "Show a beautiful landscape",
+            "duration": 60,
+            "keywords": ["nature", "landscape", "mountains"]
+        }
+
+        plan = curator.plan_scene_visuals(simple_scene, {})
+
+        assert plan["rendering_method"] == "ffmpeg"
+        assert "assets_needed" in plan
+        assert "ffmpeg_instructions" in plan
+
+    def test_plan_intro_scene_remotion(self, mock_llm):
+        """Test that intro scenes use Remotion."""
+        curator = VisualCuratorAgent(mock_llm)
+
+        intro_scene = {
+            "scene_number": 0,
+            "type": "intro",
+            "visual_cues": "Animated intro with logo",
+            "duration": 90
+        }
+
+        context = {
+            "video_title": "Test Video",
+            "accent_color": "#4ecdc4"
+        }
+
+        plan = curator.plan_scene_visuals(intro_scene, context)
+
+        assert plan["rendering_method"] == "remotion"
+        assert plan["composition"] == "Intro"
+        assert "remotion_spec" in plan
+        assert plan["remotion_spec"]["title"] == "Test Video"
+
+    def test_plan_data_viz_scene_remotion(self, mock_llm):
+        """Test that data visualization scenes use Remotion."""
+        curator = VisualCuratorAgent(mock_llm)
+
+        data_scene = {
+            "scene_number": 2,
+            "type": "content",
+            "visual_cues": "Show data viz chart with statistics",
+            "duration": 180,
+            "chart_type": "bar",
+            "chart_title": "Growth Over Time"
+        }
+
+        plan = curator.plan_scene_visuals(data_scene, {})
+
+        assert plan["rendering_method"] == "remotion"
+        assert plan["composition"] == "DataViz"
+        assert plan["remotion_spec"]["chartType"] == "bar"
+
+    def test_ken_burns_selection(self, mock_llm):
+        """Test Ken Burns effect type selection."""
+        curator = VisualCuratorAgent(mock_llm)
+
+        # Test different visual cues
+        zoom_in_scene = {
+            "type": "content",
+            "visual_cues": "Zoom in on the subject",
+            "duration": 60
+        }
+
+        kb_type = curator._select_ken_burns_type(zoom_in_scene)
+        assert kb_type == "zoom_in"
+
+        zoom_out_scene = {
+            "type": "content",
+            "visual_cues": "Zoom out from closeup",
+            "duration": 60
+        }
+
+        kb_type = curator._select_ken_burns_type(zoom_out_scene)
+        assert kb_type == "zoom_out"
+
+    def test_concrete_enumeration_prefers_specific_image_queries(self, mock_llm):
+        curator = VisualCuratorAgent(mock_llm)
+
+        scene = {
+            "scene_id": "scene-1",
+            "type": "content",
+            "narration": "There are three types of tomatoes: green tomatoes, red tomatoes, and cherry tomatoes.",
+            "visual_intent": "Show a green tomato, a red tomato, and a cherry tomato at the right moment.",
+            "duration": 18,
+            "keywords": ["tomatoes", "vegetables"],
+        }
+
+        plan = curator.build_scene_plan(scene, previous_context={})
+
+        assert plan.render_mode == "image_motion"
+        queries = [request.query for request in plan.asset_requests]
+        assert "green tomatoes" in queries
+        assert "red tomatoes" in queries
+        assert "cherry tomatoes" in queries
+
+
+class TestReviewerAgent:
+    """Test Reviewer agent functionality."""
+
+    def test_agent_creation(self, mock_llm):
+        """Test Reviewer agent can be created."""
+        reviewer = ReviewerAgent(mock_llm)
+        assert reviewer.role == "Quality Assurance Reviewer"
+        assert reviewer.goal
+
+    def test_review_good_script(self, mock_llm):
+        """Test reviewing a good script."""
+        reviewer = ReviewerAgent(mock_llm)
+
+        good_script = {
+            "title": "Amazing Video",
+            "scenes": [
+                {
+                    "scene_number": 1,
+                    "type": "intro",
+                    "narration": "Did you know that this topic is fascinating? " * 5,
+                    "visual_cues": "Engaging visuals",
+                    "duration": 45,
+                    "keywords": ["amazing"]
+                },
+                {
+                    "scene_number": 2,
+                    "type": "content",
+                    "narration": "Here are some interesting facts. " * 5,
+                    "visual_cues": "Relevant imagery",
+                    "duration": 60,
+                    "keywords": ["facts"]
+                },
+                {
+                    "scene_number": 3,
+                    "type": "outro",
+                    "narration": "Thanks for watching!",
+                    "visual_cues": "Outro graphics",
+                    "duration": 15,
+                    "keywords": ["outro"]
+                }
+            ]
+        }
+
+        review = reviewer.review_script(good_script)
+
+        assert "approved" in review
+        assert "score" in review
+        assert "feedback" in review
+        assert review["score"] > 0.7  # Should pass
+
+    def test_review_poor_script(self, mock_llm):
+        """Test reviewing a script that needs improvement."""
+        reviewer = ReviewerAgent(mock_llm)
+
+        poor_script = {
+            "title": "Boring Video",
+            "scenes": [
+                {
+                    "scene_number": 1,
+                    "type": "content",
+                    "narration": "This is a very boring opening with no hook.",
+                    "visual_cues": "Some visuals",
+                    "duration": 10,
+                    "keywords": ["boring"]
+                }
+            ]
+        }
+
+        review = reviewer.review_script(poor_script)
+
+        assert "approved" in review
+        assert "score" in review
+        # May or may not be approved depending on scoring
+
+    def test_review_visuals(self, mock_llm):
+        """Test reviewing visual plan."""
+        reviewer = ReviewerAgent(mock_llm)
+
+        visual_plan = {
+            "scenes": [
+                {"rendering_method": "remotion"},
+                {"rendering_method": "ffmpeg"},
+                {"rendering_method": "ffmpeg"}
+            ]
+        }
+
+        review = reviewer.review_visuals(visual_plan)
+
+        assert "approved" in review
+        assert "score" in review
+        assert review["approved"] is True
+        assert review["has_balance"] is True
