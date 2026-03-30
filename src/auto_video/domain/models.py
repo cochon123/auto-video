@@ -24,7 +24,7 @@ RiskLevel = Literal["low", "medium", "high"]
 class ContractBaseModel(BaseModel):
     """Base model for domain contracts."""
 
-    model_config = ConfigDict(extra="forbid", validate_assignment=True)
+    model_config = ConfigDict(validate_assignment=True)
 
 
 class VideoBrief(ContractBaseModel):
