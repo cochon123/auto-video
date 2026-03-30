@@ -1,61 +1,27 @@
-"""Video core module."""
+"""Video core module.
+
+This module now contains only LocalAssetsManager and VideoComposer.
+The base provider classes have been moved to core.providers.base.
+For backwards compatibility, these classes are re-exported.
+"""
+
+from __future__ import annotations
 
 import logging
 import random
 import shutil
 import subprocess
 import tempfile
-from abc import ABC, abstractmethod
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from auto_video.core.providers.base import Asset, ImageResult, StockProvider, VideoResult
 from auto_video.utils.gpu import GPUDetector
 
 logger = logging.getLogger(__name__)
 
-
-@dataclass
-class VideoResult:
-    id: str
-    url: str
-    duration: int
-    thumbnail: str
-    quality: str
-
-
-@dataclass
-class ImageResult:
-    """Result from searching stock images."""
-    id: str
-    url: str
-    thumbnail: str
-    width: int
-    height: int
-
-
-class StockProvider(ABC):
-    @abstractmethod
-    def search_videos(self, query: str, duration_min: int) -> list[VideoResult]: ...
-
-    @abstractmethod
-    def download_video(self, video_id: str, output_path: Path, quality: str) -> Path: ...
-
-    @abstractmethod
-    def search_images(self, query: str) -> list[ImageResult]: ...
-
-    @abstractmethod
-    def download_image(self, image_id: str, output_path: Path) -> Path: ...
-
-    @abstractmethod
-    def health_check(self) -> bool: ...
-
-
-@dataclass
-class Asset:
-    path: Path
-    type: Literal["video", "image"]
-    duration: float | None
+# Re-export for backwards compatibility
+__all__ = ["VideoResult", "ImageResult", "StockProvider", "Asset", "LocalAssetsManager", "VideoComposer"]
 
 
 class LocalAssetsManager:

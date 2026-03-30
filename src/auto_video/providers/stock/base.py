@@ -5,7 +5,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from auto_video.core.video import ImageResult, StockProvider, VideoResult
+from auto_video.core.providers.base import ImageResult, StockProvider, VideoResult
 
 logger = logging.getLogger(__name__)
 

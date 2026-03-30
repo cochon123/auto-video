@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from auto_video.config.schema import VisualsConfig
-from auto_video.core.video import ImageResult, StockProvider, VideoResult
+from auto_video.core.providers.base import ImageResult, StockProvider, VideoResult
 from auto_video.providers.stock.base import MockStockProvider
 
 if TYPE_CHECKING:
