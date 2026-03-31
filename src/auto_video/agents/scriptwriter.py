@@ -115,27 +115,40 @@ class ScriptwriterAgent(BaseAgent):
 
     def revise_script(
         self,
-        script: dict[str, Any],
+        script: ScriptPlan | dict[str, Any],
         feedback: dict[str, Any],
-    ) -> dict[str, Any]:
+    ) -> ScriptPlan | dict[str, Any]:
+        # Convert ScriptPlan to dict if needed
+        if isinstance(script, ScriptPlan):
+            script_dict = script.model_dump()
+            return_dict = False
+        else:
+            script_dict = script
+            return_dict = True
+
         revision_requests = feedback.get("revision_requests", [])
-        if not script.get("scenes"):
+        if not script_dict.get("scenes"):
             return script
+
         for request in revision_requests:
             lowered = request.lower()
             if "hook" in lowered:
-                script["scenes"][0]["narration"] = "Did you know that " + str(
-                    script["scenes"][0].get("narration", "")
+                script_dict["scenes"][0]["narration"] = "Did you know that " + str(
+                    script_dict["scenes"][0].get("narration", "")
                 )
             elif any(keyword in lowered for keyword in ["runtime", "duration", "expand", "shorten"]):
                 if "shorten" in lowered:
-                    for scene in script["scenes"]:
+                    for scene in script_dict["scenes"]:
                         scene["narration"] = self._shorten_narration(str(scene.get("narration", "")))
                 else:
-                    script["scenes"][-1]["narration"] = self._expand_narration(
-                        str(script["scenes"][-1].get("narration", ""))
+                    script_dict["scenes"][-1]["narration"] = self._expand_narration(
+                        str(script_dict["scenes"][-1].get("narration", ""))
                     )
-        return script
+
+        # Convert back to ScriptPlan if input was ScriptPlan
+        if not return_dict:
+            return ScriptPlan.model_validate(script_dict)
+        return script_dict
 
     def _build_script_prompt(
         self,
