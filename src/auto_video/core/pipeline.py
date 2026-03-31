@@ -1346,9 +1346,6 @@ class VideoPipeline:
                     estimated_script_duration,
                 )
 
-                llm.cleanup()
-                del llm
-
                 if self._progress_display:
                     self._progress_display.update_script_content(script)
                     self._progress_display.update_artifact_path(0, str(workspace.script_path))
