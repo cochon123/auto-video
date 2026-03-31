@@ -1074,3 +1074,47 @@ def test_pipeline_state_initialization() -> None:
     assert state.completed_steps == []
     assert state.failed_step is None
     assert state.error is None
+
+
+def test_resolve_duration_hint_uses_user_value(pipeline: VideoPipeline) -> None:
+    state = PipelineState(
+        video_id="test-id",
+        title="Test Title",
+        format="long",
+        lang="fr",
+        duration=600,
+        skip_upload=True,
+        current_step=1,
+        completed_steps=[],
+        failed_step=None,
+        error=None,
+        output_path=None,
+        youtube_url=None,
+        created_at="2024-01-01T00:00:00",
+        updated_at="2024-01-01T00:00:00",
+    )
+
+    assert pipeline._resolve_duration_hint(state) == 600
+    assert pipeline._resolve_duration_hint_source(state) == "user"
+
+
+def test_resolve_duration_hint_uses_default_when_missing(pipeline: VideoPipeline) -> None:
+    state = PipelineState(
+        video_id="test-id",
+        title="Test Title",
+        format="short",
+        lang="fr",
+        duration=None,
+        skip_upload=True,
+        current_step=1,
+        completed_steps=[],
+        failed_step=None,
+        error=None,
+        output_path=None,
+        youtube_url=None,
+        created_at="2024-01-01T00:00:00",
+        updated_at="2024-01-01T00:00:00",
+    )
+
+    assert pipeline._resolve_duration_hint(state) == 300
+    assert pipeline._resolve_duration_hint_source(state) == "default"

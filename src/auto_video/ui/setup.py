@@ -22,6 +22,7 @@ from auto_video.config.schema import (
     VisualsConfig,
     YouTubeConfig,
 )
+from auto_video.core.llm import load_prompt
 
 PrivacyType = Literal["public", "unlisted", "private"]
 
@@ -141,7 +142,7 @@ class LLMSetupWizard:
         self.console.print("[bold]Select LLM Mode:[/bold]")
         self.console.print()
 
-        choices = ["1. API (OpenAI, Anthropic, Groq, Google)", "2. Local (Ollama)", "3. Hybrid"]
+        choices = ["1. API (OpenAI, Anthropic, Groq, Google, OpenRouter ...)", "2. Local (Ollama)", "3. Hybrid"]
 
         for choice in choices:
             self.console.print(f"  {choice}")
@@ -171,12 +172,13 @@ class LLMSetupWizard:
         if not provider:
             return None
 
-        model = self._select_model(provider)
-        if not model:
-            return None
-
+        # Get API key first (needed for OpenRouter model fetching)
         api_key = _get_api_key(self.console, provider)
         if not api_key:
+            return None
+
+        model = self._select_model_with_api_key(provider, api_key)
+        if not model:
             return None
 
         temperature = self._get_temperature()
@@ -239,6 +241,136 @@ class LLMSetupWizard:
             pass
         return []
 
+    def _get_openrouter_models(self, api_key: str) -> list[dict]:
+        """Get available models from OpenRouter API.
+
+        Args:
+            api_key: OpenRouter API key.
+
+        Returns:
+            List of available models with details.
+        """
+        try:
+            headers = {
+                "Authorization": f"Bearer {api_key}",
+                "HTTP-Referer": "https://github.com/made2591/auto-video",
+                "X-Title": "Auto-Video",
+            }
+
+            with httpx.Client(timeout=15.0) as client:
+                response = client.get(
+                    "https://openrouter.ai/api/v1/models",
+                    headers=headers
+                )
+
+                if response.status_code == 200:
+                    data = response.json()
+                    models = data.get("data", [])
+                    # Filter for chat completion models
+                    return [
+                        {
+                            "id": model.get("id", ""),
+                            "name": model.get("name", ""),
+                            "description": model.get("description", ""),
+                            "pricing": model.get("pricing", {}),
+                            "context_length": model.get("context_length", 0)
+                        }
+                        for model in models
+                        if model.get("id") and model.get("pricing") and model.get("context_length", 0) > 1000
+                    ]
+                else:
+                    self.console.print(f"[yellow]Could not fetch models: HTTP {response.status_code}[/yellow]")
+                    return []
+        except Exception as e:
+            self.console.print(f"[yellow]Error fetching OpenRouter models: {e}[/yellow]")
+            return []
+
+    def _interactive_model_selector(self, models: list[dict], provider: str) -> str | None:
+        """Search-based model selection for OpenRouter.
+
+        Args:
+            models: List of model dictionaries with 'id', 'name', 'context_length'.
+            provider: Provider name.
+
+        Returns:
+            Selected model ID or None if cancelled.
+        """
+        if not models:
+            self.console.print("[red]No models available.[/red]")
+            return None
+
+        # Sort by context length
+        sorted_models = sorted(models, key=lambda m: m.get("context_length", 0), reverse=True)
+
+        while True:
+            # Ask for search
+            try:
+                search = self.console.input(
+                    "\n[cyan]Enter search term (or press Enter to show all): [/cyan]"
+                ).strip()
+            except KeyboardInterrupt:
+                return None
+
+            # Filter models
+            if search:
+                filtered = [
+                    m for m in sorted_models
+                    if search.lower() in m.get("name", "").lower()
+                    or search.lower() in m.get("id", "").lower()
+                ]
+            else:
+                filtered = sorted_models
+
+            if not filtered:
+                self.console.print("[yellow]No models match your search. Try again.[/yellow]")
+                continue
+
+            # Display first 20 models
+            self.console.print(f"\n[bold]{len(filtered)} models found (showing first 20):[/bold]\n")
+
+            for i, model in enumerate(filtered[:20], 1):
+                name = model.get("name", "")
+                ctx_len = model.get("context_length", 0)
+
+                # Format context length
+                if ctx_len > 1_000_000:
+                    ctx_str = f"{ctx_len // 1_000_000}M"
+                elif ctx_len > 1_000:
+                    ctx_str = f"{ctx_len // 1_000}K"
+                else:
+                    ctx_str = str(ctx_len)
+
+                # Truncate name if too long
+                display_name = name[:45] + "..." if len(name) > 45 else name
+                self.console.print(f"  {i:2}. {display_name} [{ctx_str}]")
+
+            if len(filtered) > 20:
+                self.console.print(f"     [dim]... and {len(filtered) - 20} more[/dim]")
+
+            # Get selection
+            try:
+                selection = self.console.input(
+                    f"\n[cyan]Select model (1-{min(20, len(filtered))}) or search again: [/cyan]"
+                ).strip()
+
+                if not selection:
+                    continue  # Allow new search
+
+                index = int(selection) - 1
+                if 0 <= index < min(20, len(filtered)):
+                    selected_model = filtered[index]
+                    model_id = selected_model["id"]
+                    self.console.print(f"[green]Selected: {selected_model['name']}[/green]")
+                    return model_id
+                else:
+                    self.console.print("[yellow]Invalid selection. Try again.[/yellow]")
+            except ValueError:
+                self.console.print("[yellow]Invalid input. Enter a number.[/yellow]")
+            except KeyboardInterrupt:
+                return None
+
+        return None
+
     def _setup_hybrid_provider(self) -> LLMProviderConfig | None:
         """Setup hybrid LLM provider.
 
@@ -290,6 +422,7 @@ class LLMSetupWizard:
             ("groq", "Groq (Fast Llama API)"),
             ("google", "Google (Gemini)"),
             ("zhipuai", "Zhipu AI (z.ai)"),
+            ("openrouter", "OpenRouter (Multiple models)"),
         ]
 
         table = Table(title="Available API Providers")
@@ -332,21 +465,129 @@ class LLMSetupWizard:
                 "glm-4.7-flash",
                 "glm-5",
             ],
+            "openrouter": [
+                "deepseek/deepseek-r1",
+                "anthropic/claude-3.5-sonnet",
+                "google/gemini-flash-exp",
+                "meta-llama/llama-3.3-70b-instruct",
+                "openai/gpt-4o",
+                "mistralai/mixtral-8x22b-instruct",
+                "qwen/qwen-2.5-72b-instruct",
+            ],
         }
 
         provider_models = models.get(provider, [])
         if not provider_models:
             return Prompt.ask("Enter model name")
 
-        self.console.print(f"[bold]Available models for {provider}:[/bold]")
-        for idx, model in enumerate(provider_models, 1):
-            self.console.print(f"  {idx}. {model}")
+        # Use interactive selector for better UX
+        self.console.print(f"\n[bold]Select model for {provider}:[/bold]")
+        selected_model = self._simple_interactive_selector(provider_models, provider)
+        return selected_model
 
-        choices = [str(i) for i in range(1, len(provider_models) + 1)]
-        selection = Prompt.ask("Select model", choices=choices, default="1")
+    def _select_model_with_api_key(self, provider: str, api_key: str) -> str | None:
+        """Select model for provider with API key available.
 
-        idx = int(selection) - 1
-        return provider_models[idx]
+        Args:
+            provider: Provider name.
+            api_key: API key for the provider.
+
+        Returns:
+            Model name or None if cancelled.
+        """
+        models = {
+            "openai": ["gpt-4o", "gpt-4-turbo", "gpt-3.5-turbo"],
+            "anthropic": ["claude-3-opus", "claude-3-sonnet", "claude-3-haiku"],
+            "groq": ["llama3.1-70b", "mixtral-8x7b", "gemma-7b"],
+            "google": ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.5-pro", "gemma-3-27b-it"],
+            "zhipuai": [
+                "glm-4.5",
+                "glm-4-flash",
+                "glm-4-long",
+                "glm-z1-air",
+                "glm-4.5-flash",
+                "glm-4.7",
+                "glm-4.7-flash",
+                "glm-5",
+            ],
+        }
+
+        # Handle OpenRouter with dynamic model fetching
+        if provider == "openrouter":
+            self.console.print("[yellow]Fetching available OpenRouter models...[/yellow]")
+
+            # Get models from OpenRouter API
+            openrouter_models = self._get_openrouter_models(api_key)
+
+            if openrouter_models:
+                # Use interactive selector for OpenRouter
+                selected_model = self._interactive_model_selector(openrouter_models, provider)
+                return selected_model
+            else:
+                # Fallback to static list if API fails
+                provider_models = models.get(provider, [])
+                if not provider_models:
+                    return Prompt.ask("Enter model name")
+
+                self.console.print("[yellow]Could not fetch models from OpenRouter API. Using fallback list.[/yellow]")
+                # Use interactive selector for fallback
+                return self._simple_interactive_selector(provider_models, provider)
+
+        # Handle other providers normally
+        provider_models = models.get(provider, [])
+        if not provider_models:
+            return Prompt.ask("Enter model name")
+
+        # Use interactive selector for better UX
+        self.console.print(f"\n[bold]Select model for {provider}:[/bold]")
+        selected_model = self._simple_interactive_selector(provider_models, provider)
+        return selected_model
+
+    def _simple_interactive_selector(self, models: list[str], provider: str) -> str | None:
+        """Simple model selection using numbered list.
+
+        Args:
+            models: List of available model names.
+            provider: Provider name.
+
+        Returns:
+            Selected model name or None if cancelled.
+        """
+        if not models:
+            self.console.print("[red]No models available.[/red]")
+            return None
+
+        self.console.print(f"\n[bold]Available {provider} models:[/bold]\n")
+
+        # Display all models
+        for i, model in enumerate(models, 1):
+            self.console.print(f"  {i}. {model}")
+
+        # Get selection
+        while True:
+            try:
+                selection = self.console.input(
+                    f"\n[cyan]Select model (1-{len(models)}): [/cyan]"
+                ).strip()
+
+                if not selection:
+                    selected_model = models[0]
+                    self.console.print(f"[green]Selected: {selected_model}[/green]")
+                    return selected_model
+
+                index = int(selection) - 1
+                if 0 <= index < len(models):
+                    selected_model = models[index]
+                    self.console.print(f"[green]Selected: {selected_model}[/green]")
+                    return selected_model
+                else:
+                    self.console.print("[yellow]Invalid selection. Try again.[/yellow]")
+            except ValueError:
+                self.console.print("[yellow]Invalid input. Enter a number.[/yellow]")
+            except KeyboardInterrupt:
+                return None
+
+        return None
 
     def _get_api_key(self, provider: str) -> str | None:
         """Get API key from user.
@@ -1450,14 +1691,15 @@ class PromptsSetupResult:
 class PromptsSetupWizard:
     """Wizard for configuring prompts."""
 
-    def __init__(self, console: Console | None = None) -> None:
+    def __init__(self, console: Console | None = None, prompts_dir: Path | None = None) -> None:
         """Initialize wizard.
 
         Args:
             console: Rich console instance. If None, creates a new one.
+            prompts_dir: Directory where editable prompt copies are stored.
         """
         self.console = console or Console()
-        self.prompts_dir = Path(__file__).parent.parent.parent.parent / "prompts"
+        self.prompts_dir = prompts_dir or (Path(__file__).resolve().parents[1] / "prompts")
 
     def run(self) -> PromptsSetupResult:
         """Run prompts setup wizard.
@@ -1560,6 +1802,9 @@ class PromptsSetupWizard:
         )
 
         if action == "edit":
+            prompt_file.parent.mkdir(parents=True, exist_ok=True)
+            if not prompt_file.exists():
+                prompt_file.write_text(load_prompt(f"{prompt_name}.txt"), encoding="utf-8")
             self._open_editor(prompt_file)
             self._load_prompt(prompt_name)
             self.console.print(f"[green]✓ {prompt_name.title()} prompt updated[/green]")
@@ -1579,7 +1824,7 @@ class PromptsSetupWizard:
         prompt_file = self.prompts_dir / f"{prompt_name}.txt"
 
         if not prompt_file.exists():
-            return f"Default {prompt_name} prompt"
+            return load_prompt(f"{prompt_name}.txt")
 
         return prompt_file.read_text().strip()
 
@@ -1610,14 +1855,9 @@ class PromptsSetupWizard:
         Args:
             prompt_name: Name of the prompt.
         """
-        default_prompts = {
-            "general": "# General prompt for video script generation",
-            "targeted": "# Targeted prompt for specific video topics",
-            "image": "# Prompt for image generation",
-        }
-
         prompt_file = self.prompts_dir / f"{prompt_name}.txt"
-        prompt_file.write_text(default_prompts[prompt_name])
+        prompt_file.parent.mkdir(parents=True, exist_ok=True)
+        prompt_file.write_text(load_prompt(f"{prompt_name}.txt"), encoding="utf-8")
 
     def _reset_all_prompts(self) -> None:
         """Reset all prompts to their default values."""
@@ -1961,7 +2201,9 @@ class SetupWizard:
         self.storage_wizard = StorageSetupWizard(self.console)
         self.visuals_wizard = VisualsSetupWizard(self.console)
         self.tts_image_wizard = TTSImageSetupWizard(self.console)
-        self.prompts_wizard = PromptsSetupWizard(self.console)
+        self.prompts_wizard = PromptsSetupWizard(
+            self.console, self.config_path.parent / "prompts"
+        )
         self.youtube_wizard = YouTubeSetupWizard(self.console)
 
         self.llm_config: LLMProviderConfig | None = None

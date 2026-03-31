@@ -15,7 +15,7 @@ __all__ = ["LLM", "LLMProvider", "MockLLMProvider", "load_prompt", "clean_markdo
 
 PROMPTS_PACKAGE = "auto_video"
 # Backwards-compatible fallback for editable installs and tests that patch this path.
-PROMPTS_DIR = Path(__file__).resolve().parents[3] / "prompts"
+PROMPTS_DIR = Path(__file__).resolve().parents[1] / "prompts"
 
 
 def clean_markdown(text: str) -> str:
@@ -132,10 +132,7 @@ class LLM:
 
     def extract_keywords(self, text: str) -> list[str]:
         logger.debug("[LLM] Extracting keywords from text: %d chars", len(text))
-        prompt = (
-            "Extract the main keywords from the following text. "
-            f"Return ONLY a comma-separated list of keywords with no formatting:\n\n{text}"
-        )
+        prompt = load_prompt("extract_keywords.txt", text=text)
         response = self._provider.generate(prompt)
         response = response.strip()
         if response.lower().startswith("keywords"):
@@ -148,8 +145,7 @@ class LLM:
         return keywords[:10] if keywords else ["nature", "technology", "business"]
 
     def generate_image_prompt(self, context: str) -> str:
-        prompt_template = load_prompt("image.txt")
-        prompt = prompt_template.replace("{context}", context)
+        prompt = load_prompt("image_generation.txt", context=context)
         return self._provider.generate(prompt)
 
     def cleanup(self) -> None:

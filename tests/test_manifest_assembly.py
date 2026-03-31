@@ -181,6 +181,7 @@ def test_assembly_engine_consumes_multiple_assets_per_scene(tmp_path: Path) -> N
 
     composer.trim_video_to_duration.side_effect = _copy_input_to_output
     composer.concatenate_with_transitions.side_effect = _concat
+    composer.get_duration.return_value = 20.0
     composer.add_audio.side_effect = lambda video_path, _audio_path, output_path: (
         None if video_path == output_path else shutil.copy2(video_path, output_path)
     )
@@ -201,6 +202,10 @@ def test_assembly_engine_consumes_multiple_assets_per_scene(tmp_path: Path) -> N
 
     assert output_path.exists()
     assert manifest.output_video == str(workspace.final_path)
+    assert manifest.total_duration_s == pytest.approx(20.0)
+    assert manifest.metadata["planning_target_duration_s"] == pytest.approx(20.0)
+    assert manifest.metadata["actual_audio_duration_s"] == pytest.approx(20.0)
+    assert manifest.metadata["actual_video_duration_s"] == pytest.approx(20.0)
     assert workspace.manifest_path.exists()
     assert len(composer.concatenate_with_transitions.call_args_list) == 2
     first_concat_args = composer.concatenate_with_transitions.call_args_list[0].args[0]
@@ -249,7 +254,9 @@ def test_assembly_engine_extends_video_when_audio_is_longer(tmp_path: Path) -> N
     )
 
     composer = MagicMock()
-    composer.get_duration.side_effect = lambda path: 12.0 if path == audio_path else 8.0
+    composer.get_duration.side_effect = (
+        lambda path: 12.0 if path in {audio_path, workspace.final_path} else 8.0
+    )
     composer.concatenate_with_transitions.side_effect = lambda clips, output, *_args, **_kwargs: output.write_bytes(b"raw")
     composer.add_audio.side_effect = lambda video_path, _audio_path, output_path: output_path.write_bytes(b"final")
     composer.apply_format_with_temp.side_effect = lambda *_args, **_kwargs: None
@@ -264,6 +271,77 @@ def test_assembly_engine_extends_video_when_audio_is_longer(tmp_path: Path) -> N
     )
 
     composer.extend_video_to_duration.assert_called_once()
+    assert manifest.total_duration_s == pytest.approx(12.0)
+    assert manifest.metadata["actual_audio_duration_s"] == pytest.approx(12.0)
+
+
+def test_assembly_engine_uses_audio_as_final_duration_when_manifest_is_longer(tmp_path: Path) -> None:
+    workspace = Workspace(tmp_path, "assembly-audio-truth")
+    workspace.create()
+
+    asset = _write_dummy_clip(workspace.assets_video_dir / "asset.mp4", b"asset")
+    audio_path = _write_dummy_clip(workspace.audio_path, b"audio")
+
+    manifest = VideoManifest(
+        video_id="assembly-audio-truth",
+        title="Assembly Audio Truth",
+        language="en",
+        total_duration_s=600.0,
+        scenes=[
+            TimelineScene(
+                scene_id="scene-1",
+                start_s=0,
+                end_s=600,
+                narration="Narration",
+                subtitles="Narration",
+                render_mode="stock_video",
+                assets=[
+                    TimelineAsset(
+                        asset_id="asset-1",
+                        path=str(asset),
+                        source="stock",
+                        start_s=0,
+                        end_s=600,
+                        scene_start_s=0,
+                        scene_end_s=600,
+                        role="primary_visual",
+                    )
+                ],
+                effects=[],
+                editable_notes="",
+            )
+        ],
+        workspace_dir=str(workspace.workspace_path),
+        metadata={"planning_target_duration_s": 600.0},
+    )
+
+    composer = MagicMock()
+    composer.get_duration.side_effect = lambda path: 120.0 if path == audio_path or path == workspace.final_path else 600.0
+    composer.concatenate_with_transitions.side_effect = lambda clips, output, *_args, **_kwargs: output.write_bytes(b"raw")
+    composer.add_audio.side_effect = lambda _video_path, _audio_path, output_path: output_path.write_bytes(b"final")
+    composer.apply_format_with_temp.side_effect = lambda *_args, **_kwargs: None
+
+    engine = AssemblyEngine(composer=composer)
+    engine.render_from_manifest(
+        manifest=manifest,
+        workspace=workspace,
+        audio_path=audio_path,
+        output_path=workspace.final_path,
+        video_format="long",
+    )
+
+    assert any(
+        call.args == (
+            workspace.video_raw_path,
+            workspace.video_raw_path,
+            120.0,
+        )
+        for call in composer.trim_video_to_duration.call_args_list
+    )
+    assert manifest.total_duration_s == pytest.approx(120.0)
+    assert manifest.metadata["planning_target_duration_s"] == pytest.approx(600.0)
+    assert manifest.metadata["actual_audio_duration_s"] == pytest.approx(120.0)
+    assert manifest.metadata["actual_video_duration_s"] == pytest.approx(120.0)
 
 
 def test_assembly_engine_falls_back_to_cpu_formatting(tmp_path: Path) -> None:
@@ -312,6 +390,7 @@ def test_assembly_engine_falls_back_to_cpu_formatting(tmp_path: Path) -> None:
     composer.concatenate_with_transitions.side_effect = lambda clips, output, *_args, **_kwargs: shutil.copy2(
         clips[0], output
     )
+    composer.get_duration.return_value = 10.0
     composer.add_audio.side_effect = lambda video_path, _audio_path, output_path: shutil.copy2(
         video_path, output_path
     )

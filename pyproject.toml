@@ -45,6 +45,9 @@ image-local = [
 visual-search = [
     "duckduckgo-search>=6.0.0",
 ]
+openrouter = [
+    "openai>=1.0.0",
+]
 youtube = [
     "google-auth>=2.0.0",
     "google-auth-oauthlib>=1.0.0",

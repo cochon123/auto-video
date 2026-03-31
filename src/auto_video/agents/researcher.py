@@ -6,19 +6,20 @@ from typing import Any
 
 from auto_video.agents.base import BaseAgent
 from auto_video.agents.contracts import ResearchBundle, ResearchItem, VideoBrief
+from auto_video.core.llm import load_prompt
 
 
 class ResearchAgent(BaseAgent):
     @property
     def role(self) -> str:
-        return "Research Analyst"
+        return load_prompt("agents/researcher_role.txt")
 
     @property
     def goal(self) -> str:
-        return "Collect concise factual anchors and angles for the script."
+        return load_prompt("agents/researcher_goal.txt")
 
     def backstory(self) -> str:
-        return "You produce compact research notes optimized for short-form video writing."
+        return load_prompt("agents/researcher_backstory.txt")
 
     def create_crewai_agent(self) -> Any:
         try:

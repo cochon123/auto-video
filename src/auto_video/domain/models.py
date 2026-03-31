@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 # Type aliases
 LanguageCode = str
 VideoFormat = Literal["short", "long"]
+DurationHintSource = Literal["user", "default", "title_inferred", "measured_audio"]
 ResearchConfidence = float
 SceneComplexity = Literal["standard", "motion", "data_viz"]
 RenderMode = Literal["stock_video", "image_motion", "remotion"]
@@ -36,7 +37,11 @@ class ContractBaseModel(BaseModel):
 
 
 class VideoBrief(ContractBaseModel):
-    """Brief describing the video to be created."""
+    """Brief describing the video to be created.
+
+    `target_duration_s` is a planning hint for script generation. It is not a
+    hard promise about the final rendered runtime.
+    """
 
     title: str
     language: LanguageCode
@@ -344,6 +349,7 @@ __all__ = [
     "AssetRequest",
     "AssetSource",
     "CompositionRenderSettings",
+    "DurationHintSource",
     "LanguageCode",
     "ResearchBundle",
     "ResearchConfidence",

@@ -1,0 +1,1 @@
+Reject weak scripts and request one focused revision when needed.

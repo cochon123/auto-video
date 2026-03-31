@@ -14,27 +14,27 @@ from typing import Any
 
 from auto_video.agents.base import BaseAgent
 from auto_video.agents.contracts import ResearchBundle, ScriptPlan, ScriptScene, VideoBrief
+from auto_video.core.llm import load_prompt
 
 logger = logging.getLogger(__name__)
+
+MIN_SCENES = 3
+MAX_SCENES = 20
+SCENE_TARGET_SECONDS = 30.0
+RUNTIME_TOLERANCE_PCT = 15
 
 
 class ScriptwriterAgent(BaseAgent):
     @property
     def role(self) -> str:
-        return "Video Scriptwriter"
+        return load_prompt("agents/scriptwriter_role.txt")
 
     @property
     def goal(self) -> str:
-        return (
-            "Write engaging, well-structured video scripts that are concise, "
-            "clear, and easy to narrate."
-        )
+        return load_prompt("agents/scriptwriter_goal.txt")
 
     def backstory(self) -> str:
-        return (
-            "You are a documentary and educational scriptwriter who prioritizes "
-            "strong hooks, short spoken sentences, and clear visual intent."
-        )
+        return load_prompt("agents/scriptwriter_backstory.txt")
 
     def create_crewai_agent(self) -> Any:
         try:
@@ -84,12 +84,26 @@ class ScriptwriterAgent(BaseAgent):
         return self._coerce_script_plan(raw_script, topic, structure, research_bundle)
 
     def write_script_plan(self, brief: VideoBrief, research_bundle: ResearchBundle | None = None) -> ScriptPlan:
+        scene_count = self._estimate_scene_count(brief.target_duration_s)
+        estimated_scene_duration = max(brief.target_duration_s / scene_count, 10.0)
+        segments: list[dict[str, Any]] = []
+        for index in range(scene_count):
+            if index == 0:
+                segment_type = "intro"
+            elif index == scene_count - 1:
+                segment_type = "outro"
+            else:
+                segment_type = "content"
+            segments.append(
+                {
+                    "type": segment_type,
+                    "estimated_duration": estimated_scene_duration,
+                }
+            )
         structure = {
-            "segments": [
-                {"type": "intro", "estimated_duration": max(brief.target_duration_s / 3.0, 10.0)},
-                {"type": "content", "estimated_duration": max(brief.target_duration_s / 3.0, 10.0)},
-                {"type": "outro", "estimated_duration": max(brief.target_duration_s / 3.0, 10.0)},
-            ]
+            "target_duration_s": brief.target_duration_s,
+            "runtime_tolerance_pct": RUNTIME_TOLERANCE_PCT,
+            "segments": segments,
         }
         return self.build_script_plan(
             topic=brief.title,
@@ -105,11 +119,22 @@ class ScriptwriterAgent(BaseAgent):
         feedback: dict[str, Any],
     ) -> dict[str, Any]:
         revision_requests = feedback.get("revision_requests", [])
+        if not script.get("scenes"):
+            return script
         for request in revision_requests:
-            if "hook" in request.lower() and script.get("scenes"):
+            lowered = request.lower()
+            if "hook" in lowered:
                 script["scenes"][0]["narration"] = "Did you know that " + str(
                     script["scenes"][0].get("narration", "")
                 )
+            elif any(keyword in lowered for keyword in ["runtime", "duration", "expand", "shorten"]):
+                if "shorten" in lowered:
+                    for scene in script["scenes"]:
+                        scene["narration"] = self._shorten_narration(str(scene.get("narration", "")))
+                else:
+                    script["scenes"][-1]["narration"] = self._expand_narration(
+                        str(script["scenes"][-1].get("narration", ""))
+                    )
         return script
 
     def _build_script_prompt(
@@ -120,21 +145,23 @@ class ScriptwriterAgent(BaseAgent):
         language: str,
         research_bundle: ResearchBundle | None,
     ) -> str:
-        num_scenes = len(structure.get("segments", []))
-        avg_duration = structure.get("segments", [{}])[0].get("estimated_duration", 60)
+        segments = structure.get("segments", [])
+        num_scenes = len(segments)
+        avg_duration = segments[0].get("estimated_duration", SCENE_TARGET_SECONDS) if segments else SCENE_TARGET_SECONDS
         research_block = ""
         if research_bundle is not None:
             research_block = json.dumps(research_bundle.model_dump(), ensure_ascii=False, indent=2)
-        return (
-            f"Write a video script about: {topic}\n\n"
-            f"Requirements:\n- Number of scenes: {num_scenes}\n"
-            f"- Target duration per scene: ~{avg_duration:.0f} seconds\n"
-            f"- Tone: {tone}\n"
-            f"- Language: {language}\n"
-            f"{('Research context:\n' + research_block + '\n') if research_block else ''}"
-            "Return JSON with title, scenes, and optional closing_cta.\n"
-            "Each scene should contain narration, visual cues, duration, keywords, and requires_complex_motion.\n"
-            "Keep sentences relatively short for better TTS output."
+        research_section = f"Research context:\n{research_block}\n" if research_block else ""
+        return load_prompt(
+            "agents/scriptwriter_prompt.txt",
+            topic=topic,
+            num_scenes=str(num_scenes),
+            avg_duration=f"{avg_duration:.0f}",
+            target_duration_s=str(structure.get("target_duration_s", int(avg_duration * max(num_scenes, 1)))),
+            runtime_tolerance_pct=str(structure.get("runtime_tolerance_pct", RUNTIME_TOLERANCE_PCT)),
+            tone=tone,
+            language=language,
+            research_section=research_section,
         )
 
     def _parse_script_response(
@@ -254,3 +281,29 @@ class ScriptwriterAgent(BaseAgent):
             if token not in deduped:
                 deduped.append(token)
         return deduped or ["video"]
+
+    def _estimate_scene_count(self, target_duration_s: int) -> int:
+        if target_duration_s <= 0:
+            return MIN_SCENES
+        estimate = int(round(target_duration_s / SCENE_TARGET_SECONDS))
+        return max(MIN_SCENES, min(MAX_SCENES, estimate))
+
+    def _expand_narration(self, narration: str) -> str:
+        narration = narration.strip()
+        if not narration:
+            return narration
+        addition = " This lets us unpack the idea in a little more detail."
+        if narration.endswith("."):
+            return narration + addition
+        return narration + "." + addition
+
+    def _shorten_narration(self, narration: str) -> str:
+        narration = narration.strip()
+        if not narration:
+            return narration
+        sentences = [
+            sentence.strip()
+            for sentence in re.split(r"(?<=[.!?])\s+", narration)
+            if sentence.strip()
+        ]
+        return " ".join(sentences[:2]) if sentences else narration

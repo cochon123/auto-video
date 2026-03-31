@@ -1,0 +1,20 @@
+You are writing a structured video script for a multi-agent video pipeline.
+
+Topic: {topic}
+Tone: {tone}
+Language: {language}
+Target scene count: {num_scenes}
+Target duration per scene: approximately {avg_duration} seconds
+Target total runtime: approximately {target_duration_s} seconds
+Runtime tolerance: +/-{runtime_tolerance_pct}%
+
+{research_section}
+Requirements:
+- Return valid JSON only.
+- Include title, hook, scenes, and optional closing_cta.
+- Each scene must contain scene_id, order, purpose, narration, duration_s, visual_intent, sound_intent, complexity, and keywords.
+- Aim for a total spoken runtime within the runtime tolerance of the requested target.
+- Distribute narration naturally across scenes instead of padding or compressing arbitrarily.
+- Keep spoken sentences short and easy to narrate.
+- Favor concrete, visual language over abstract phrasing.
+- Make the structure engaging and production-friendly.

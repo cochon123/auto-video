@@ -6,19 +6,23 @@ from typing import Any
 
 from auto_video.agents.base import BaseAgent
 from auto_video.agents.contracts import ReviewResult, ScriptPlan
+from auto_video.core.llm import load_prompt
+
+WORDS_PER_SECOND = 2.5
+RUNTIME_TOLERANCE_PCT = 15
 
 
 class ReviewerAgent(BaseAgent):
     @property
     def role(self) -> str:
-        return "Quality Assurance Reviewer"
+        return load_prompt("agents/reviewer_role.txt")
 
     @property
     def goal(self) -> str:
-        return "Reject weak scripts and request one focused revision when needed."
+        return load_prompt("agents/reviewer_goal.txt")
 
     def backstory(self) -> str:
-        return "You review scripts for clarity, engagement, timing, and production usefulness."
+        return load_prompt("agents/reviewer_backstory.txt")
 
     def create_crewai_agent(self) -> Any:
         try:
@@ -71,9 +75,16 @@ class ReviewerAgent(BaseAgent):
             return result.model_dump() if return_dict else result
 
         engagement = 1.0 if "?" in script.hook or len(script.hook.split()) >= 6 else 0.7
-        clarity = 1.0 if all(len(scene.narration.split()) <= 45 for scene in scenes) else 0.7
+        clarity = 1.0 if all(
+            len([word for word in scene.narration.split() if word.strip()])
+            <= max(int(scene.duration_s * WORDS_PER_SECOND * 1.2), 20)
+            for scene in scenes
+        ) else 0.7
         structure = 1.0 if len(scenes) >= 3 else 0.4
-        timing = 1.0 if sum(scene.duration_s for scene in scenes) >= 30 else 0.5
+        declared_duration = sum(scene.duration_s for scene in scenes)
+        estimated_duration = sum(self._estimate_spoken_duration(scene.narration) for scene in scenes)
+        timing_delta = abs(estimated_duration - declared_duration) / max(declared_duration, 1.0)
+        timing = max(0.0, 1.0 - timing_delta)
         visual = 1.0 if all(scene.visual_intent for scene in scenes) else 0.5
 
         criteria = {
@@ -89,8 +100,13 @@ class ReviewerAgent(BaseAgent):
             revision_requests.append("Strengthen the opening hook")
         if clarity < 0.8:
             revision_requests.append("Shorten spoken sentences")
+        if timing_delta > (RUNTIME_TOLERANCE_PCT / 100.0):
+            if estimated_duration < declared_duration:
+                revision_requests.append("Expand narration to better match the requested runtime")
+            else:
+                revision_requests.append("Shorten narration to better match the requested runtime")
 
-        approved = score >= 0.8 and len(scenes) >= 2
+        approved = score >= 0.8 and len(scenes) >= 2 and not revision_requests
         result = ReviewResult(
             approved=approved,
             score=score,
@@ -111,3 +127,7 @@ class ReviewerAgent(BaseAgent):
             "feedback": "Visual plan is balanced." if balanced else "Visual plan leans too heavily on Remotion.",
             "has_balance": balanced,
         }
+
+    def _estimate_spoken_duration(self, text: str) -> float:
+        words = len([word for word in text.split() if word.strip()])
+        return max(words / WORDS_PER_SECOND, 0.1)

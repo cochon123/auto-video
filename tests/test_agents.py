@@ -8,6 +8,7 @@ Visual Curator, and Reviewer agents.
 import pytest
 from pathlib import Path
 
+from auto_video.agents.contracts import ScriptPlan, ScriptScene, VideoBrief
 from auto_video.agents.director import DirectorAgent
 from auto_video.agents.scriptwriter import ScriptwriterAgent
 from auto_video.agents.visual_curator import VisualCuratorAgent
@@ -166,6 +167,75 @@ class TestScriptwriterAgent:
         assert "visual_cues" in first_scene
         assert "duration" in first_scene
         assert "keywords" in first_scene
+
+    def test_write_script_plan_scales_scene_count_with_duration(self, mock_llm):
+        """Test that scene count scales with the requested duration."""
+        writer = ScriptwriterAgent(mock_llm)
+        captured: dict[str, dict] = {}
+
+        def fake_build_script_plan(topic, structure, tone="informative", language="fr", research_bundle=None):
+            captured["structure"] = structure
+            return ScriptPlan(
+                title=topic,
+                hook="Hook",
+                scenes=[
+                    ScriptScene(
+                        scene_id="scene-1",
+                        order=1,
+                        purpose="content",
+                        narration="Fallback narration.",
+                        duration_s=30.0,
+                        visual_intent="Fallback visuals",
+                        sound_intent=None,
+                        complexity="standard",
+                        keywords=["fallback"],
+                    )
+                ],
+                closing_cta=None,
+            )
+
+        brief = VideoBrief(
+            title="Long Form Topic",
+            language="en",
+            format="long",
+            target_duration_s=300,
+            audience="general",
+            tone="informative",
+            requires_research=False,
+            creative_direction="Detailed",
+            factual_risk="low",
+        )
+
+        with pytest.MonkeyPatch.context() as monkeypatch:
+            monkeypatch.setattr(writer, "build_script_plan", fake_build_script_plan)
+            writer.write_script_plan(brief)
+
+        assert "structure" in captured
+        assert len(captured["structure"]["segments"]) == 10
+        assert captured["structure"]["target_duration_s"] == 300
+
+    def test_build_script_prompt_contains_runtime_tolerance(self, mock_llm):
+        """Test prompt includes runtime guidance."""
+        writer = ScriptwriterAgent(mock_llm)
+        prompt = writer._build_script_prompt(
+            topic="Climate Change",
+            structure={
+                "target_duration_s": 300,
+                "runtime_tolerance_pct": 15,
+                "segments": [
+                    {"type": "intro", "estimated_duration": 30},
+                    {"type": "content", "estimated_duration": 30},
+                    {"type": "outro", "estimated_duration": 30},
+                ],
+            },
+            tone="informative",
+            language="en",
+            research_bundle=None,
+        )
+
+        assert "Target total runtime: approximately 300 seconds" in prompt
+        assert "Runtime tolerance: +/-15%" in prompt
+        assert "Aim for a total spoken runtime within the runtime tolerance" in prompt
 
     def test_revise_script(self, mock_llm):
         """Test script revision."""
@@ -391,25 +461,25 @@ class TestReviewerAgent:
                 {
                     "scene_number": 1,
                     "type": "intro",
-                    "narration": "Did you know that this topic is fascinating? " * 5,
+                    "narration": "Did you know that this topic is fascinating and worth exploring in detail? " * 6,
                     "visual_cues": "Engaging visuals",
-                    "duration": 45,
+                    "duration": 30,
                     "keywords": ["amazing"]
                 },
                 {
                     "scene_number": 2,
                     "type": "content",
-                    "narration": "Here are some interesting facts. " * 5,
+                    "narration": "Here are some interesting facts that build the story step by step with clarity. " * 6,
                     "visual_cues": "Relevant imagery",
-                    "duration": 60,
+                    "duration": 30,
                     "keywords": ["facts"]
                 },
                 {
                     "scene_number": 3,
                     "type": "outro",
-                    "narration": "Thanks for watching!",
+                    "narration": "Thanks for watching, and join us next time for more practical insights. " * 6,
                     "visual_cues": "Outro graphics",
-                    "duration": 15,
+                    "duration": 30,
                     "keywords": ["outro"]
                 }
             ]
@@ -421,6 +491,45 @@ class TestReviewerAgent:
         assert "score" in review
         assert "feedback" in review
         assert review["score"] > 0.7  # Should pass
+
+    def test_review_flags_runtime_mismatch(self, mock_llm):
+        """Test reviewing a script whose spoken runtime is far from its target."""
+        reviewer = ReviewerAgent(mock_llm)
+
+        mismatched_script = {
+            "title": "Runtime mismatch",
+            "scenes": [
+                {
+                    "scene_number": 1,
+                    "type": "content",
+                    "narration": "Short narration one.",
+                    "visual_cues": "Relevant visuals",
+                    "duration": 60,
+                    "keywords": ["one"],
+                },
+                {
+                    "scene_number": 2,
+                    "type": "content",
+                    "narration": "Short narration two.",
+                    "visual_cues": "Relevant visuals",
+                    "duration": 60,
+                    "keywords": ["two"],
+                },
+                {
+                    "scene_number": 3,
+                    "type": "content",
+                    "narration": "Short narration three.",
+                    "visual_cues": "Relevant visuals",
+                    "duration": 60,
+                    "keywords": ["three"],
+                },
+            ],
+        }
+
+        review = reviewer.review_script(mismatched_script)
+
+        assert review["approved"] is False
+        assert any("runtime" in request.lower() or "duration" in request.lower() for request in review["revision_requests"])
 
     def test_review_poor_script(self, mock_llm):
         """Test reviewing a script that needs improvement."""

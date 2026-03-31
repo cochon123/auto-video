@@ -1,0 +1,3 @@
+Extract the main keywords from the following text. Return ONLY a comma-separated list of keywords with no formatting:
+
+{text}

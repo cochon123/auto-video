@@ -18,6 +18,8 @@ logger = logging.getLogger(__name__)
 class AssemblyEngine:
     """Render a final video from a structured manifest."""
 
+    AUDIO_SYNC_TOLERANCE_S = 0.25
+
     def __init__(self, composer: VideoComposer | None = None) -> None:
         self.composer = composer or VideoComposer()
 
@@ -32,7 +34,13 @@ class AssemblyEngine:
         workspace.create()
         clip_paths: list[Path] = []
         audio_duration = self._safe_duration(audio_path)
-        target_duration = max(manifest.total_duration_s, audio_duration or 0.0)
+        planning_duration = self._planning_duration(manifest)
+        if audio_duration is None or audio_duration <= 0:
+            fallback_audio = manifest.metadata.get("actual_audio_duration_s")
+            if isinstance(fallback_audio, (int, float)) and fallback_audio > 0:
+                audio_duration = float(fallback_audio)
+            else:
+                raise ValueError("Audio duration is required for final assembly")
 
         for scene in manifest.scenes:
             if scene.render_mode == "remotion":
@@ -46,21 +54,21 @@ class AssemblyEngine:
         self.composer.concatenate_with_transitions(
             clip_paths,
             workspace.video_raw_path,
-            target_duration,
+            planning_duration,
         )
         raw_duration = self._safe_duration(workspace.video_raw_path)
-        if raw_duration is not None and raw_duration > target_duration:
-            self.composer.trim_video_to_duration(
-                workspace.video_raw_path,
-                workspace.video_raw_path,
-                target_duration,
-            )
-        elif raw_duration is not None and raw_duration < target_duration and hasattr(self.composer, "extend_video_to_duration"):
-            self.composer.extend_video_to_duration(
-                workspace.video_raw_path,
-                workspace.video_raw_path,
-                target_duration,
-            )
+        logger.info(
+            "[Assembly] Duration planning=%.2fs, audio=%.2fs, raw_before_sync=%s",
+            planning_duration,
+            audio_duration,
+            f"{raw_duration:.2f}s" if raw_duration is not None else "unknown",
+        )
+        self._normalize_video_to_audio(workspace.video_raw_path, audio_duration)
+        normalized_duration = self._safe_duration(workspace.video_raw_path)
+        logger.info(
+            "[Assembly] Raw video normalized to audio: raw_after_sync=%s",
+            f"{normalized_duration:.2f}s" if normalized_duration is not None else "unknown",
+        )
         self.composer.add_audio(workspace.video_raw_path, audio_path, output_path)
         try:
             self.composer.apply_format_with_temp(output_path, output_path, video_format)
@@ -77,8 +85,20 @@ class AssemblyEngine:
             )
             fallback_composer.apply_format_with_temp(output_path, output_path, video_format)
 
+        final_duration = self._safe_duration(output_path) or audio_duration
         manifest.output_video = str(output_path)
-        manifest.total_duration_s = max(target_duration, 0.1)
+        manifest.total_duration_s = max(final_duration, 0.1)
+        manifest.metadata.update(
+            {
+                "planning_target_duration_s": round(float(planning_duration), 2),
+                "actual_audio_duration_s": round(float(audio_duration), 2),
+                "actual_video_duration_s": round(float(final_duration), 2),
+            }
+        )
+        logger.info(
+            "[Assembly] Final duration after mux/format: %.2fs",
+            final_duration,
+        )
         save_manifest(manifest, workspace.manifest_path)
         return output_path
 
@@ -136,12 +156,62 @@ class AssemblyEngine:
     def _safe_duration(self, media_path: Path) -> float | None:
         get_duration = getattr(self.composer, "get_duration", None)
         if get_duration is None:
-            return None
+            return self._probe_duration(media_path)
         try:
             duration = get_duration(media_path)
         except Exception:
+            return self._probe_duration(media_path)
+        if isinstance(duration, (int, float)) and duration > 0:
+            return float(duration)
+        return self._probe_duration(media_path)
+
+    def _probe_duration(self, media_path: Path) -> float | None:
+        try:
+            result = subprocess.run(
+                [
+                    getattr(self.composer, "ffprobe_path", "ffprobe"),
+                    "-v",
+                    "error",
+                    "-show_entries",
+                    "format=duration",
+                    "-of",
+                    "default=noprint_wrappers=1:nokey=1",
+                    str(media_path),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+        except (subprocess.TimeoutExpired, FileNotFoundError):
             return None
-        return float(duration) if isinstance(duration, (int, float)) else None
+        if result.returncode != 0 or not result.stdout.strip():
+            return None
+        try:
+            return float(result.stdout.strip())
+        except ValueError:
+            return None
+
+    def _planning_duration(self, manifest: VideoManifest) -> float:
+        metadata_duration = manifest.metadata.get("planning_target_duration_s")
+        if isinstance(metadata_duration, (int, float)) and metadata_duration > 0:
+            return float(metadata_duration)
+        return max(float(manifest.total_duration_s), 0.1)
+
+    def _normalize_video_to_audio(self, video_path: Path, audio_duration: float) -> None:
+        current_duration = self._safe_duration(video_path)
+        if current_duration is None:
+            logger.warning(
+                "[Assembly] Could not measure raw video duration before audio mux; skipping pre-mux normalization"
+            )
+            return
+        delta = current_duration - audio_duration
+        if abs(delta) <= self.AUDIO_SYNC_TOLERANCE_S:
+            return
+        if delta > 0:
+            self.composer.trim_video_to_duration(video_path, video_path, audio_duration)
+            return
+        if hasattr(self.composer, "extend_video_to_duration"):
+            self.composer.extend_video_to_duration(video_path, video_path, audio_duration)
 
     def _render_remotion_scene(self, scene, workspace: Workspace) -> Path:
         renderer = get_renderer()

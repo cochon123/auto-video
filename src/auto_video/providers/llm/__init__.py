@@ -36,6 +36,10 @@ def create_provider(config: LLMProviderConfig) -> LLMProvider:
         from auto_video.providers.llm.llamacpp import LlamaCppProvider
 
         return LlamaCppProvider(config)
+    if provider_name == "openrouter":
+        from auto_video.providers.llm.openrouter import OpenRouterProvider
+
+        return OpenRouterProvider(config)
     return MockLLMProvider(config)
 
 

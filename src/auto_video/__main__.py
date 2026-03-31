@@ -160,10 +160,12 @@ def cmd_setup_tts(args: argparse.Namespace) -> int:
 
 def cmd_setup_prompts(args: argparse.Namespace) -> int:
     """Run only the Prompts setup wizard."""
+    from auto_video.config.loader import get_default_config_path
     from auto_video.ui.setup import PromptsSetupWizard
 
     console = Console()
-    wizard = PromptsSetupWizard(console)
+    config_path = args.config if args.config else get_default_config_path()
+    wizard = PromptsSetupWizard(console, config_path.parent / "prompts")
 
     result = wizard.run()
 
@@ -252,7 +254,7 @@ def cmd_create(args: argparse.Namespace) -> int:
         console.print(f"  Title: {title or 'Auto-generated'}")
         console.print(f"  Format: {video_format}")
         console.print(f"  Language: {lang}")
-        console.print(f"  Duration: {args.duration if args.duration else 'default'}")
+        console.print(f"  Duration hint: {args.duration if args.duration else 'default'}")
         console.print(f"  Skip upload: {skip_upload}")
         console.print("  Mode: dev (detailed output)")
         console.print()
@@ -614,7 +616,7 @@ def cmd_config_edit_section(args: argparse.Namespace) -> int:
     elif section == "prompts":
         from auto_video.ui.setup import PromptsSetupWizard
 
-        wizard = PromptsSetupWizard(console)  # type: ignore[assignment]
+        wizard = PromptsSetupWizard(console, config_path.parent / "prompts")  # type: ignore[assignment]
         result = wizard.run()
 
         if not result.success:
@@ -664,6 +666,7 @@ def cmd_models(args: argparse.Namespace) -> int:
         llm_table.add_row("Groq", "llama3.1-70b, mixtral-8x7b, gemma-7b")
         llm_table.add_row("Google", "gemini-2.5-flash, gemini-2.0-flash, gemini-2.5-pro")
         llm_table.add_row("Zhipu AI (z.ai)", "glm-4.5, glm-4-flash, glm-4-long, glm-z1-air")
+        llm_table.add_row("OpenRouter", "deepseek-r1, claude-3.5-sonnet, gemini-flash-exp, llama-3.3-70b-instruct")
         llm_table.add_row("Ollama (Local)", "Any model available in Ollama")
 
         console.print(llm_table)
@@ -747,12 +750,12 @@ def main() -> int:
     create_parser.add_argument("--title", "-t", type=str, help="Video title")
     create_parser.add_argument("--auto", action="store_true", help="Auto-generate title")
     create_parser.add_argument(
-        "--format", "-f", choices=["short", "long"], help="Video format (short or long)"
+        "--format", "-f", choices=["short", "long"], help="Video format preset (short=vertical, long=landscape)"
     )
     create_parser.add_argument(
         "--lang", "-l", type=str, default="fr", help="Video language (default: fr)"
     )
-    create_parser.add_argument("--duration", "-d", type=int, help="Duration in seconds")
+    create_parser.add_argument("--duration", "-d", type=int, help="Approximate script duration hint in seconds")
     create_parser.add_argument("--no-upload", action="store_true", help="Skip upload to YouTube")
     create_parser.add_argument("--keep-temp", action="store_true", help="Keep temporary files")
     create_parser.add_argument(

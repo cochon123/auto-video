@@ -101,6 +101,9 @@ class PipelineState(BaseModel):
 
 
 class VideoPipeline:
+    DEFAULT_DURATION_HINT_S = 300
+    SPOKEN_WORDS_PER_SECOND = 2.5
+
     def __init__(
         self,
         config: AppConfig,
@@ -145,7 +148,7 @@ class VideoPipeline:
         logger.info(f"Title: {title}")
         logger.info(f"Format: {format}")
         logger.info(f"Language: {lang}")
-        logger.info(f"Duration: {duration}")
+        logger.info(f"Duration hint: {duration}")
 
         return self.resume(
             video_id=video_id,
@@ -202,7 +205,38 @@ class VideoPipeline:
         parts = [scene.narration.strip() for scene in script_plan.scenes if scene.narration.strip()]
         return "\n\n".join(parts)
 
-    def _load_brief(self, workspace: Workspace) -> VideoBrief:
+    def _resolve_duration_hint(self, state: PipelineState) -> int:
+        return state.duration if state.duration and state.duration > 0 else self.DEFAULT_DURATION_HINT_S
+
+    def _resolve_duration_hint_source(self, state: PipelineState) -> str:
+        return "user" if state.duration and state.duration > 0 else "default"
+
+    def _estimate_spoken_duration(self, text: str) -> float:
+        words = len(text.split())
+        return round(words / self.SPOKEN_WORDS_PER_SECOND, 2) if words else 0.0
+
+    def _record_duration_metadata(
+        self,
+        state: PipelineState,
+        *,
+        planning_target_duration_s: float | None = None,
+        duration_hint_source: str | None = None,
+        estimated_script_duration_s: float | None = None,
+        actual_audio_duration_s: float | None = None,
+        actual_video_duration_s: float | None = None,
+    ) -> None:
+        if planning_target_duration_s is not None:
+            state.artifacts["planning_target_duration_s"] = round(float(planning_target_duration_s), 2)
+        if duration_hint_source is not None:
+            state.artifacts["duration_hint_source"] = duration_hint_source
+        if estimated_script_duration_s is not None:
+            state.artifacts["estimated_script_duration_s"] = round(float(estimated_script_duration_s), 2)
+        if actual_audio_duration_s is not None:
+            state.artifacts["actual_audio_duration_s"] = round(float(actual_audio_duration_s), 2)
+        if actual_video_duration_s is not None:
+            state.artifacts["actual_video_duration_s"] = round(float(actual_video_duration_s), 2)
+
+    def _load_brief(self, workspace: Workspace, state: PipelineState | None = None) -> VideoBrief:
         if self._real_path_exists(workspace.brief_path):
             return VideoBrief.model_validate_json(workspace.brief_path.read_text(encoding="utf-8"))
         title = (
@@ -210,15 +244,20 @@ class VideoPipeline:
             if self._real_path_exists(workspace.script_path)
             else "Auto-generated video"
         )
+        duration_hint = self._resolve_duration_hint(state) if state is not None else self.DEFAULT_DURATION_HINT_S
         return VideoBrief(
             title=title or "Auto-generated video",
             language="fr",
-            format="long",
-            target_duration_s=60,
+            format=state.format if state is not None and state.format == "short" else "long",
+            target_duration_s=duration_hint,
             audience="general",
             tone="informative",
             requires_research=False,
-            creative_direction="Fallback brief reconstructed from legacy script artifact.",
+            creative_direction=(
+                "Fallback brief reconstructed from legacy script artifact for a vertical, mobile-first video."
+                if state is not None and state.format == "short"
+                else "Fallback brief reconstructed from legacy script artifact for a landscape editorial video."
+            ),
             factual_risk="low",
         )
 
@@ -545,10 +584,16 @@ class VideoPipeline:
                 llm = LLM(self.config.llm)
                 self._progress = PipelineProgress(video_id, PipelineStep.SCRIPT, 0.0)
 
-                duration = (
-                    state.duration if state.duration else (180 if state.format == "long" else 60)
+                duration_hint = self._resolve_duration_hint(state)
+                duration_source = self._resolve_duration_hint_source(state)
+                script = llm.generate_script(state.title, duration_hint, state.lang)
+                estimated_script_duration = self._estimate_spoken_duration(script)
+                self._record_duration_metadata(
+                    state,
+                    planning_target_duration_s=duration_hint,
+                    duration_hint_source=duration_source,
+                    estimated_script_duration_s=estimated_script_duration,
                 )
-                script = llm.generate_script(state.title, duration, state.lang)
                 workspace.script_path.write_text(script, encoding="utf-8")
                 completed_steps.append(PipelineStep.SCRIPT)
                 state.completed_steps.append(1)
@@ -556,7 +601,13 @@ class VideoPipeline:
                 state.updated_at = datetime.now().isoformat()
                 self._update_artifacts(state, workspace)
                 self._save_state(state)
-                logger.info("Script regenerated: %s", workspace.script_path)
+                logger.info(
+                    "Script regenerated: %s (duration_hint=%ss, source=%s, estimated_spoken_duration=%.2fs)",
+                    workspace.script_path,
+                    duration_hint,
+                    duration_source,
+                    estimated_script_duration,
+                )
 
                 # Cleanup LLM to free VRAM
                 llm.cleanup()
@@ -594,6 +645,7 @@ class VideoPipeline:
                 self._progress = PipelineProgress(video_id, PipelineStep.AUDIO, 0.0)
 
                 audio_duration = tts.synthesize_script(script, workspace.audio_path)
+                self._record_duration_metadata(state, actual_audio_duration_s=audio_duration)
                 completed_steps.append(PipelineStep.AUDIO)
                 state.completed_steps.append(2)
                 state.current_step = 3
@@ -1238,7 +1290,14 @@ class VideoPipeline:
                     youtube_url=youtube_url,
                 )
 
-        duration = state.duration if state.duration else (180 if state.format == "long" else 60)
+        duration_hint = self._resolve_duration_hint(state)
+        duration_source = self._resolve_duration_hint_source(state)
+        logger.info(
+            "Duration hint resolved: %ss (source=%s, format=%s)",
+            duration_hint,
+            duration_source,
+            state.format,
+        )
 
         if from_step_value <= 2:
             try:
@@ -1250,7 +1309,7 @@ class VideoPipeline:
 
                 brief = orchestrator.prepare_brief(
                     state.title or "Auto-generated video",
-                    duration,
+                    duration_hint,
                     state.lang,
                     state.format,
                 )
@@ -1258,6 +1317,13 @@ class VideoPipeline:
                 script_plan = orchestrator.generate_script(brief, research)
                 script_plan, review = orchestrator.review_script(script_plan)
                 script = self._script_plan_to_text(script_plan)
+                estimated_script_duration = self._estimate_spoken_duration(script)
+                self._record_duration_metadata(
+                    state,
+                    planning_target_duration_s=duration_hint,
+                    duration_hint_source=duration_source,
+                    estimated_script_duration_s=estimated_script_duration,
+                )
 
                 self._write_json_artifact(workspace.brief_path, brief)
                 self._write_json_artifact(workspace.research_path, research)
@@ -1271,9 +1337,11 @@ class VideoPipeline:
                 self._update_artifacts(state, workspace)
                 self._save_state(state)
                 logger.info(
-                    "Agent preproduction complete: script=%s, review_score=%.2f",
+                    "Agent preproduction complete: script=%s, review_score=%.2f, duration_hint=%ss, estimated_spoken_duration=%.2fs",
                     workspace.script_path,
                     review.score,
+                    duration_hint,
+                    estimated_script_duration,
                 )
 
                 llm.cleanup()
@@ -1318,6 +1386,7 @@ class VideoPipeline:
                     self._progress_display.start_step(1, "Synthèse vocale...")
 
                 audio_duration = tts.synthesize_script(script, workspace.audio_path)
+                self._record_duration_metadata(state, actual_audio_duration_s=audio_duration)
                 completed_steps.append(PipelineStep.AUDIO)
                 state.completed_steps.append(2)
                 state.current_step = max(state.current_step, 3)
@@ -1367,7 +1436,7 @@ class VideoPipeline:
                 if self._progress_display:
                     self._progress_display.start_step(2, "Plan visuel multi-agent et collecte des assets...")
 
-                brief = self._load_brief(workspace)
+                brief = self._load_brief(workspace, state)
                 research = self._load_research(workspace)
                 script_plan = self._load_script_plan(workspace)
                 scene_plans = orchestrator.plan_visuals(brief, script_plan)
@@ -1381,6 +1450,14 @@ class VideoPipeline:
                     workspace,
                     resolved_assets,
                 )
+                manifest.metadata.update(
+                    {
+                        "planning_target_duration_s": round(float(brief.target_duration_s), 2),
+                        "duration_hint_source": duration_source,
+                    }
+                )
+                if audio_duration > 0:
+                    manifest.metadata["actual_audio_duration_s"] = round(float(audio_duration), 2)
                 workspace.scene_plan_path.write_text(
                     json.dumps([scene.model_dump(mode="json") for scene in scene_plans], indent=2, ensure_ascii=False),
                     encoding="utf-8",
@@ -1453,6 +1530,9 @@ class VideoPipeline:
                     workspace.final_path,
                     state.format,
                 )
+                final_duration = self._get_audio_duration(workspace.final_path)
+                if final_duration > 0:
+                    self._record_duration_metadata(state, actual_video_duration_s=final_duration)
 
                 completed_steps.append(PipelineStep.MONTAGE)
                 state.completed_steps.append(4)

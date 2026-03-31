@@ -8,22 +8,20 @@ from typing import Any
 
 from auto_video.agents.base import BaseAgent
 from auto_video.agents.contracts import VideoBrief
+from auto_video.core.llm import load_prompt
 
 
 class DirectorAgent(BaseAgent):
     @property
     def role(self) -> str:
-        return "Video Director"
+        return load_prompt("agents/director_role.txt")
 
     @property
     def goal(self) -> str:
-        return "Turn a user prompt into a clear production brief for the video team."
+        return load_prompt("agents/director_goal.txt")
 
     def backstory(self) -> str:
-        return (
-            "You are a documentary video director who turns rough ideas into clear, "
-            "high-signal production briefs."
-        )
+        return load_prompt("agents/director_backstory.txt")
 
     def create_crewai_agent(self) -> Any:
         try:
@@ -49,9 +47,16 @@ class DirectorAgent(BaseAgent):
     ) -> VideoBrief:
         factual_risk = self._assess_factual_risk(topic)
         requires_research = factual_risk in {"medium", "high"} or self._contains_rare_entity(topic)
-        creative_direction = (
-            "Use a strong hook, a documentary pace, and visual variety with a premium editorial feel."
-        )
+        if video_format == "short":
+            creative_direction = (
+                "Plan for a vertical, mobile-first video with a strong hook, faster pacing, "
+                "clean visual beats, and concise narration."
+            )
+        else:
+            creative_direction = (
+                "Plan for a landscape editorial video with a documentary pace, stronger scene "
+                "build-up, and broader visual variety."
+            )
         return VideoBrief(
             title=topic.strip(),
             language=language,

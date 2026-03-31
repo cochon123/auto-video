@@ -1,0 +1,1 @@
+Turn a user prompt into a clear production brief for the video team.

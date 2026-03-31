@@ -23,6 +23,7 @@ from auto_video.agents.contracts import (
     VideoBrief,
 )
 from auto_video.remotion import get_registry, get_renderer
+from auto_video.core.llm import load_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -30,20 +31,14 @@ logger = logging.getLogger(__name__)
 class VisualCuratorAgent(BaseAgent):
     @property
     def role(self) -> str:
-        return "Visual Content Curator"
+        return load_prompt("agents/visual_curator_role.txt")
 
     @property
     def goal(self) -> str:
-        return (
-            "Choose the most suitable visual treatment for each scene, balancing "
-            "stock footage, image motion, and Remotion."
-        )
+        return load_prompt("agents/visual_curator_goal.txt")
 
     def backstory(self) -> str:
-        return (
-            "You are a visual producer who can tell when stock media is enough "
-            "and when motion graphics are worth the extra effort."
-        )
+        return load_prompt("agents/visual_curator_backstory.txt")
 
     def create_crewai_agent(self) -> Any:
         try:
