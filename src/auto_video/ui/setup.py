@@ -2749,10 +2749,13 @@ class ProviderSetupWizard:
             from auto_video.providers.llm import create_provider
             from auto_video.config.schema import LLMProviderConfig
 
+            # Get provider-appropriate default model
+            test_model = self._get_test_model(credentials.provider)
+
             # Create a minimal config for testing
             test_config = LLMProviderConfig(
                 provider=credentials.provider,
-                model="gpt-4o",  # Default model for testing
+                model=test_model,
                 api_key=credentials.api_key,
                 host=credentials.host,
             )
@@ -2768,6 +2771,19 @@ class ProviderSetupWizard:
         except Exception as e:
             self.console.print(f"[red]Connection test failed: {e}[/red]")
             return False
+
+    def _get_test_model(self, provider_type: str) -> str:
+        """Get a test model for the given provider type."""
+        test_models = {
+            "openai": "gpt-4o",
+            "anthropic": "claude-3-haiku",
+            "groq": "llama3.1-70b",
+            "google": "gemini-2.0-flash",
+            "zhipuai": "glm-4-flash",
+            "openrouter": "deepseek-r1",
+            "ollama": "llama3.2",
+        }
+        return test_models.get(provider_type, "gpt-4o")
 
 
 class AgentMappingWizard:

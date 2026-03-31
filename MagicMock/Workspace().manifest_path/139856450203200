@@ -1,0 +1,73 @@
+{
+  "generated_at": "2026-03-30T23:51:03.243776Z",
+  "language": "fr",
+  "metadata": {
+    "actual_audio_duration_s": 30.0,
+    "duration_hint_source": "user",
+    "planning_target_duration_s": 60.0
+  },
+  "output_video": null,
+  "scenes": [
+    {
+      "assets": [
+        {
+          "asset_id": "scene_01-primary",
+          "end_s": 30.0,
+          "path": "/tmp/pytest-of-cochon/pytest-64/test_run_skips_upload_when_ski0/temp/clip1.mp4",
+          "role": "primary_visual",
+          "scene_end_s": null,
+          "scene_start_s": null,
+          "source": "stock",
+          "start_s": 0.0
+        }
+      ],
+      "editable_notes": "",
+      "effects": [
+        "cut"
+      ],
+      "end_s": 30.0,
+      "narration": "Test scene one narration.",
+      "remotion_composition": null,
+      "remotion_props": {},
+      "remotion_source_file": null,
+      "remotion_spec": null,
+      "render_mode": "stock_video",
+      "scene_id": "scene_01",
+      "start_s": 0.0,
+      "subtitles": "Test scene one narration."
+    },
+    {
+      "assets": [
+        {
+          "asset_id": "scene_02-primary",
+          "end_s": 60.0,
+          "path": "/tmp/pytest-of-cochon/pytest-64/test_run_skips_upload_when_ski0/temp/clip2.mp4",
+          "role": "primary_visual",
+          "scene_end_s": null,
+          "scene_start_s": null,
+          "source": "stock",
+          "start_s": 30.0
+        }
+      ],
+      "editable_notes": "",
+      "effects": [
+        "cut"
+      ],
+      "end_s": 60.0,
+      "narration": "Test scene two narration.",
+      "remotion_composition": null,
+      "remotion_props": {},
+      "remotion_source_file": null,
+      "remotion_spec": null,
+      "render_mode": "stock_video",
+      "scene_id": "scene_02",
+      "start_s": 30.0,
+      "subtitles": "Test scene two narration."
+    }
+  ],
+  "schema_version": "1.0",
+  "title": "Test Video",
+  "total_duration_s": 60.0,
+  "video_id": "test-video-id",
+  "workspace_dir": "/tmp/pytest-of-cochon/pytest-64/test_run_skips_upload_when_ski0/temp"
+}
