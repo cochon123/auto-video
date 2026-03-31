@@ -14,9 +14,12 @@ from rich.table import Table
 
 from auto_video.config.loader import get_default_config_path, save_config
 from auto_video.config.schema import (
+    AgentModelConfig,
     AppConfig,
     ImageGenConfig,
+    LLMConfig,
     LLMProviderConfig,
+    ProviderCredentials,
     StorageConfig,
     TTSConfig,
     VisualsConfig,
@@ -2582,3 +2585,280 @@ class SetupWizard:
         except Exception as e:
             self.console.print(f"[red]Failed to save configuration: {e}[/red]")
             self.console.print("[yellow]Please check file permissions and try again.[/yellow]")
+
+
+# New wizards for multi-provider LLM support
+
+@dataclass
+class ProviderSetupResult:
+    """Result of provider setup wizard."""
+
+    credentials: ProviderCredentials | None
+    provider_name: str | None
+    success: bool
+    message: str
+
+
+@dataclass
+class AgentMappingResult:
+    """Result of agent mapping wizard."""
+
+    agent_models: dict[str, AgentModelConfig]
+    success: bool
+    message: str
+
+
+class ProviderSetupWizard:
+    """Wizard for adding provider credentials."""
+
+    def __init__(self, console: Console | None = None) -> None:
+        self.console = console or Console()
+
+    def run(self) -> ProviderSetupResult:
+        """Run the provider setup wizard."""
+        self._show_welcome()
+
+        # Get provider name
+        provider_name = self._get_provider_name()
+
+        # Select provider type
+        provider_type = self._select_provider_type()
+
+        # Get API key
+        api_key = self._get_api_key(provider_type)
+
+        # Get host (if applicable)
+        host = self._get_host(provider_type)
+
+        credentials = ProviderCredentials(
+            provider=provider_type,
+            api_key=api_key,
+            host=host,
+        )
+
+        # Optional test
+        if self._should_test():
+            if self._test_connection(credentials):
+                self.console.print("[green]Connection test successful![/green]")
+            else:
+                if not Confirm.ask("Connection test failed. Continue anyway?", default=False):
+                    return ProviderSetupResult(None, None, False, "Connection test failed")
+
+        return ProviderSetupResult(
+            credentials=credentials,
+            provider_name=provider_name,
+            success=True,
+            message="Provider configured successfully",
+        )
+
+    def _show_welcome(self) -> None:
+        """Display welcome screen."""
+        self.console.print(
+            Panel.fit(
+                "[bold blue]Add LLM Provider[/bold blue]\n\n"
+                "Configure API credentials for an LLM provider.\n"
+                "You can add multiple providers and assign them to specific agents.",
+                title="Auto-Video Setup",
+            )
+        )
+        self.console.print()
+
+    def _get_provider_name(self) -> str:
+        """Get a unique name for this provider."""
+        while True:
+            name = Prompt.ask(
+                "Enter a name for this provider (e.g., 'openrouter', 'google')",
+                console=self.console,
+            ).strip().lower().replace(" ", "_")
+
+            if not name:
+                self.console.print("[red]Provider name cannot be empty[/red]")
+                continue
+
+            return name
+
+    def _select_provider_type(self) -> str:
+        """Select provider type."""
+        self.console.print("[bold]Select Provider Type:[/bold]")
+        self.console.print()
+
+        providers = [
+            ("1", "openai", "OpenAI (GPT-4, GPT-3.5)"),
+            ("2", "anthropic", "Anthropic (Claude 3)"),
+            ("3", "groq", "Groq (Fast Llama API)"),
+            ("4", "google", "Google (Gemini)"),
+            ("5", "zhipuai", "Zhipu AI (z.ai)"),
+            ("6", "openrouter", "OpenRouter (Multiple models)"),
+            ("7", "ollama", "Ollama (Local)"),
+        ]
+
+        for idx, key, name in providers:
+            self.console.print(f"  {idx}. {name}")
+
+        choice_map = {key: idx for idx, key, _ in providers}
+        reverse_map = {str(idx): key for idx, key, _ in providers}
+
+        while True:
+            self.console.print()
+            selection = Prompt.ask(
+                "Select provider",
+                choices=[str(i) for i in range(1, len(providers) + 1)],
+                default="1",
+            )
+
+            provider_key = reverse_map.get(selection)
+            if provider_key:
+                return provider_key
+
+            self.console.print("[red]Invalid selection[/red]")
+
+    def _get_api_key(self, provider_type: str) -> str | None:
+        """Get API key for the provider."""
+        if provider_type == "ollama":
+            return None  # Ollama doesn't need an API key
+
+        if not Confirm.ask(f"\nDo you want to enter an API key for {provider_type} now?", default=True):
+            return None
+
+        self.console.print("[dim]API key will be stored in plain text in config file.[/dim]")
+
+        while True:
+            key = Prompt.ask(f"Enter {provider_type} API key", password=True)
+            if key:
+                return key
+            self.console.print("[red]API key cannot be empty[/red]")
+
+    def _get_host(self, provider_type: str) -> str | None:
+        """Get host URL for providers that need it."""
+        if provider_type == "ollama":
+            return Prompt.ask(
+                "Ollama host",
+                default="http://localhost:11434",
+            )
+        return None
+
+    def _should_test(self) -> bool:
+        """Ask if user wants to test connection."""
+        return Confirm.ask("\nDo you want to test the connection now?", default=True)
+
+    def _test_connection(self, credentials: ProviderCredentials) -> bool:
+        """Test the connection to the provider."""
+        self.console.print("\n[yellow]Testing connection...[/yellow]")
+
+        try:
+            from auto_video.providers.llm import create_provider
+            from auto_video.config.schema import LLMProviderConfig
+
+            # Create a minimal config for testing
+            test_config = LLMProviderConfig(
+                provider=credentials.provider,
+                model="gpt-4o",  # Default model for testing
+                api_key=credentials.api_key,
+                host=credentials.host,
+            )
+
+            provider = create_provider(test_config)
+
+            # Try a simple generation
+            result = provider.generate("Say 'test'")
+
+            self.console.print(f"[dim]Response: {result[:50]}...[/dim]")
+            return True
+
+        except Exception as e:
+            self.console.print(f"[red]Connection test failed: {e}[/red]")
+            return False
+
+
+class AgentMappingWizard:
+    """Wizard for configuring per-agent model selection."""
+
+    def __init__(self, console: Console | None = None, llm_config: LLMConfig | None = None) -> None:
+        self.console = console or Console()
+        self.llm_config = llm_config
+
+    def run(self) -> AgentMappingResult:
+        """Run the agent mapping wizard."""
+        if not self.llm_config or not self.llm_config.providers:
+            return AgentMappingResult(
+                agent_models={},
+                success=False,
+                message="No providers configured",
+            )
+
+        self.console.print(
+            Panel.fit(
+                "[bold blue]Configure Agent Model Assignments[/bold blue]\n\n"
+                "Specify which provider + model each agent should use.",
+                title="Auto-Video Setup",
+            )
+        )
+        self.console.print()
+
+        agent_models: dict[str, AgentModelConfig] = {}
+        provider_names = list(self.llm_config.providers.keys())
+
+        agents = [
+            ("director", "Director (creates video brief)"),
+            ("researcher", "Researcher (collects factual info)"),
+            ("scriptwriter", "Scriptwriter (writes narration)"),
+            ("reviewer", "Reviewer (validates scripts)"),
+            ("visual_curator", "Visual Curator (plans visuals)"),
+        ]
+
+        for agent_key, agent_desc in agents:
+            self.console.print(f"\n[bold cyan]{agent_desc}[/bold cyan]")
+
+            # Select provider
+            provider = Prompt.ask(
+                "  Provider",
+                choices=provider_names,
+                default=provider_names[0],
+            )
+
+            # Get model name
+            default_models = self._get_default_models(provider)
+            self.console.print(f"  [dim]Available models: {', '.join(default_models[:5])}...[/dim]")
+            model = Prompt.ask(
+                "  Model",
+                default=default_models[0] if default_models else "gpt-4o",
+            )
+
+            # Optional temperature override
+            temp = Prompt.ask(
+                "  Temperature [default: 0.7]",
+                default="0.7",
+            )
+
+            try:
+                temperature = float(temp)
+            except ValueError:
+                temperature = 0.7
+
+            agent_models[agent_key] = AgentModelConfig(
+                provider=provider,
+                model=model,
+                temperature=temperature,
+            )
+
+            self.console.print(f"  [green]✓[/green] {agent_key} → {provider}/{model}")
+
+        return AgentMappingResult(
+            agent_models=agent_models,
+            success=True,
+            message="Agent models configured",
+        )
+
+    def _get_default_models(self, provider: str) -> list[str]:
+        """Get default model list for a provider."""
+        defaults = {
+            "openrouter": ["deepseek-r1", "gpt-4o", "claude-3.5-sonnet", "gemini-flash-exp", "llama-3.3-70b-instruct"],
+            "google": ["gemini-2.0-flash", "gemini-2.5-flash", "gemini-2.5-pro", "gemma-3-27b-it"],
+            "openai": ["gpt-4o", "gpt-4-turbo", "gpt-3.5-turbo"],
+            "anthropic": ["claude-3-opus", "claude-3.5-sonnet", "claude-3-haiku"],
+            "groq": ["llama3.1-70b", "mixtral-8x7b", "gemma-7b"],
+            "zhipuai": ["glm-4.5", "glm-4-flash", "glm-4-long"],
+            "ollama": ["llama3.2", "mistral", "gemma"],
+        }
+        return defaults.get(provider, ["gpt-4o"])
+

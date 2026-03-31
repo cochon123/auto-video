@@ -16,7 +16,7 @@ from auto_video.agents.contracts import ResearchBundle, ScenePlan, ScriptPlan, V
 from auto_video.config.schema import AppConfig
 from auto_video.core.assembly import AssemblyEngine
 from auto_video.core.assets import AssetPlanner
-from auto_video.core.llm import LLM
+from auto_video.core.llm import LLM, LLMFactory
 from auto_video.manifest import load_manifest, save_manifest
 from auto_video.manifest.schema import VideoManifest
 from auto_video.core.subtitles import SubtitleGenerator, SubtitleStyle
@@ -185,13 +185,14 @@ class VideoPipeline:
             pass
         return 0.0
 
-    def _create_orchestrator(self) -> tuple[LLM, AgentOrchestrator]:
-        llm = LLM(self.config.llm)
-        return llm, AgentOrchestrator(
-            llm,
+    def _create_orchestrator(self) -> tuple[LLMFactory, AgentOrchestrator]:
+        llm_factory = LLMFactory(self.config.llm)
+        orchestrator = AgentOrchestrator(
+            llm_factory=llm_factory,
             progress_display=self._progress_display,
             verbose=bool(getattr(self._progress_display, "__class__", object).__name__ == "DevProgressDisplay"),
         )
+        return llm_factory, orchestrator
 
     def _write_json_artifact(self, path: Path, payload: BaseModel | None) -> None:
         if payload is None:
@@ -1301,7 +1302,8 @@ class VideoPipeline:
 
         if from_step_value <= 2:
             try:
-                llm, orchestrator = self._create_orchestrator()
+                llm_factory, orchestrator = self._create_orchestrator()
+                self._llm_factory = llm_factory  # Track for cleanup
                 self._progress = PipelineProgress(video_id, PipelineStep.SCRIPT, 0.0)
 
                 if self._progress_display:
@@ -1430,7 +1432,8 @@ class VideoPipeline:
 
         if from_step_value <= 4:
             try:
-                llm, orchestrator = self._create_orchestrator()
+                llm_factory, orchestrator = self._create_orchestrator()
+                self._llm_factory = llm_factory  # Track for cleanup
                 self._progress = PipelineProgress(video_id, PipelineStep.VISUALS, 0.0)
 
                 if self._progress_display:
@@ -1747,6 +1750,12 @@ class VideoPipeline:
             self._progress_display.stop()
 
         self._workspace = None
+
+        # Cleanup LLM factory
+        if hasattr(self, "_llm_factory") and self._llm_factory:
+            self._llm_factory.cleanup_all()
+            self._llm_factory = None
+
         return PipelineResult(
             video_id=video_id,
             status="success",

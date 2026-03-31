@@ -5,13 +5,13 @@ import re
 from importlib import resources
 from pathlib import Path
 
-from auto_video.config.schema import LLMProviderConfig
+from auto_video.config.schema import LLMConfig, LLMProviderConfig
 
 logger = logging.getLogger(__name__)
 from auto_video.core.provider_base import LLMProvider, MockLLMProvider
 from auto_video.providers.llm import create_provider
 
-__all__ = ["LLM", "LLMProvider", "MockLLMProvider", "load_prompt", "clean_markdown"]
+__all__ = ["LLM", "LLMFactory", "LLMProvider", "MockLLMProvider", "load_prompt", "clean_markdown"]
 
 PROMPTS_PACKAGE = "auto_video"
 # Backwards-compatible fallback for editable installs and tests that patch this path.
@@ -172,3 +172,46 @@ class LLM:
         """Context manager exit - ensure cleanup."""
         self.cleanup()
         return False
+
+
+class LLMFactory:
+    """Factory for creating and caching LLM instances per agent configuration."""
+
+    def __init__(self, llm_config: LLMConfig) -> None:
+        self._llm_config = llm_config
+        self._llm_cache: dict[str, LLM] = {}
+
+    def get_llm_for_agent(self, agent_name: str) -> LLM:
+        """Get or create an LLM instance for the specified agent."""
+        provider_config = self._llm_config.get_agent_config(agent_name)
+
+        # Cache key based on provider + model combination
+        cache_key = f"{provider_config.provider}:{provider_config.model}:{provider_config.host or 'default'}"
+
+        if cache_key not in self._llm_cache:
+            self._llm_cache[cache_key] = LLM(provider_config)
+            logger.info(
+                "[LLMFactory] Agent '%s' -> %s/%s",
+                agent_name,
+                provider_config.provider,
+                provider_config.model,
+            )
+        else:
+            logger.debug(
+                "[LLMFactory] Reusing cached LLM for agent '%s': %s/%s",
+                agent_name,
+                provider_config.provider,
+                provider_config.model,
+            )
+
+        return self._llm_cache[cache_key]
+
+    def cleanup_all(self) -> None:
+        """Cleanup all cached LLM instances."""
+        for llm in self._llm_cache.values():
+            try:
+                llm.cleanup()
+            except Exception as e:
+                logger.warning("[LLMFactory] Error cleaning up LLM: %s", str(e))
+        self._llm_cache.clear()
+        logger.debug("[LLMFactory] All LLM instances cleaned up")

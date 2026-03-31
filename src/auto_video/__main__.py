@@ -57,6 +57,117 @@ def cmd_setup_llm(args: argparse.Namespace) -> int:
         return 1
 
 
+def cmd_setup_llm_add_provider(args: argparse.Namespace) -> int:
+    """Add a new provider credential."""
+    from auto_video.config.loader import get_default_config_path, load_config, save_config
+    from auto_video.ui.setup import ProviderSetupWizard
+
+    console = Console()
+    wizard = ProviderSetupWizard(console)
+
+    result = wizard.run()
+
+    if not result.success or result.credentials is None:
+        console.print("[yellow]Provider setup cancelled or failed.[/yellow]")
+        return 1
+
+    config_path = args.config if args.config else get_default_config_path()
+    try:
+        config = load_config(config_path)
+    except FileNotFoundError:
+        console.print("[red]No existing configuration found. Run 'auto-video setup' first.[/red]")
+        return 1
+
+    # Add provider credentials
+    provider_name = result.provider_name
+    config.llm.providers[provider_name] = result.credentials
+
+    try:
+        save_config(config, config_path)
+        console.print(f"[green]Provider '{provider_name}' added successfully[/green]")
+        return 0
+    except Exception as e:
+        console.print(f"[red]Failed to save configuration: {e}[/red]")
+        return 1
+
+
+def cmd_setup_llm_set_mapping(args: argparse.Namespace) -> int:
+    """Configure model assignments for agents."""
+    from auto_video.config.loader import get_default_config_path, load_config, save_config
+    from auto_video.ui.setup import AgentMappingWizard
+
+    console = Console()
+
+    config_path = args.config if args.config else get_default_config_path()
+    try:
+        config = load_config(config_path)
+    except FileNotFoundError:
+        console.print("[red]No existing configuration found. Run 'auto-video setup' first.[/red]")
+        return 1
+
+    if not config.llm.providers:
+        console.print("[red]No providers configured. Run 'auto-video setup llm add-provider' first.[/red]")
+        return 1
+
+    wizard = AgentMappingWizard(console, config.llm)
+    result = wizard.run()
+
+    if not result.success:
+        console.print("[yellow]Agent mapping cancelled.[/yellow]")
+        return 1
+
+    config.llm.agent_models = result.agent_models
+    try:
+        save_config(config, config_path)
+        console.print("[green]Agent models configured successfully[/green]")
+        return 0
+    except Exception as e:
+        console.print(f"[red]Failed to save configuration: {e}[/red]")
+        return 1
+
+
+def cmd_setup_llm_list(args: argparse.Namespace) -> int:
+    """List configured providers and agent model assignments."""
+    from auto_video.config.loader import get_default_config_path, load_config
+    from rich.table import Table
+
+    config_path = args.config if args.config else get_default_config_path()
+    try:
+        config = load_config(config_path)
+    except FileNotFoundError:
+        console = Console()
+        console.print("[red]No configuration found. Run 'auto-video setup' first.[/red]")
+        return 1
+
+    console = Console()
+
+    # Providers table
+    providers_table = Table(title="Configured Providers")
+    providers_table.add_column("Name", style="cyan")
+    providers_table.add_column("Provider", style="green")
+    providers_table.add_column("API Key", style="yellow")
+
+    for name, creds in config.llm.providers.items():
+        key_display = "***" + (creds.api_key[-4:] if creds.api_key else "none")
+        providers_table.add_row(name, creds.provider, key_display)
+
+    console.print(providers_table)
+
+    # Agent models table
+    if config.llm.agent_models:
+        models_table = Table(title="Agent Model Assignments")
+        models_table.add_column("Agent", style="cyan")
+        models_table.add_column("Provider", style="green")
+        models_table.add_column("Model", style="yellow")
+
+        for agent_name, agent_config in config.llm.agent_models.items():
+            models_table.add_row(agent_name, agent_config.provider, agent_config.model)
+
+        console.print(models_table)
+
+    return 0
+
+
 def cmd_setup_storage(args: argparse.Namespace) -> int:
     """Run only the Storage setup wizard."""
     from auto_video.config.loader import get_default_config_path, load_config, save_config
@@ -739,7 +850,21 @@ def main() -> int:
     setup_subparsers.add_parser("all", help="Run all setup wizards")
 
     # Individual wizard subcommands
-    setup_subparsers.add_parser("llm", help="Run only LLM provider setup")
+    # LLM setup with subcommands for multi-provider support
+    setup_llm_parser = setup_subparsers.add_parser("llm", help="Configure LLM providers and models")
+    setup_llm_subparsers = setup_llm_parser.add_subparsers(
+        dest="llm_command", help="LLM configuration commands"
+    )
+
+    setup_llm_add_parser = setup_llm_subparsers.add_parser("add-provider", help="Add a new provider")
+    setup_llm_add_parser.set_defaults(func=cmd_setup_llm_add_provider)
+
+    setup_llm_mapping_parser = setup_llm_subparsers.add_parser("set-mapping", help="Configure agent model assignments")
+    setup_llm_mapping_parser.set_defaults(func=cmd_setup_llm_set_mapping)
+
+    setup_llm_list_parser = setup_llm_subparsers.add_parser("list", help="List providers and agent assignments")
+    setup_llm_list_parser.set_defaults(func=cmd_setup_llm_list)
+
     setup_subparsers.add_parser("storage", help="Run only storage setup")
     setup_subparsers.add_parser("visuals", help="Run only visuals setup")
     setup_subparsers.add_parser("tts", help="Run only TTS and Images setup")
@@ -819,9 +944,28 @@ def main() -> int:
         if not hasattr(args, "setup_subcommand") or args.setup_subcommand in (None, "all"):
             return cmd_setup()
 
+        # Handle LLM setup subcommands (multi-provider)
+        if args.setup_subcommand == "llm":
+            if hasattr(args, "llm_command") and args.llm_command:
+                # Route to the specific llm subcommand
+                if args.llm_command == "add-provider":
+                    return cmd_setup_llm_add_provider(args)
+                elif args.llm_command == "set-mapping":
+                    return cmd_setup_llm_set_mapping(args)
+                elif args.llm_command == "list":
+                    return cmd_setup_llm_list(args)
+                else:
+                    console = Console()
+                    console.print(f"[red]Unknown LLM command: {args.llm_command}[/red]")
+                    return 1
+            else:
+                # No llm subcommand, show help or default behavior
+                console = Console()
+                console.print("[yellow]Use 'auto-video setup llm add-provider', 'set-mapping', or 'list'[/yellow]")
+                return 0
+
         # Handle individual setup subcommands
         setup_subcommand_map = {
-            "llm": cmd_setup_llm,
             "storage": cmd_setup_storage,
             "visuals": cmd_setup_visuals,
             "tts": cmd_setup_tts,

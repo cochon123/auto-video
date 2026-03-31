@@ -15,11 +15,12 @@ from auto_video.agents.contracts import (
     VideoBrief,
 )
 from auto_video.agents.director import DirectorAgent
+from auto_video.agents.registry import AgentName
 from auto_video.agents.researcher import ResearchAgent
 from auto_video.agents.reviewer import ReviewerAgent
 from auto_video.agents.scriptwriter import ScriptwriterAgent
 from auto_video.agents.visual_curator import VisualCuratorAgent
-from auto_video.core.llm import LLM
+from auto_video.core.llm import LLM, LLMFactory
 from auto_video.manifest.schema import TimelineAsset, TimelineScene, VideoManifest
 from auto_video.utils.workspace import Workspace
 
@@ -29,16 +30,33 @@ logger = logging.getLogger(__name__)
 class AgentOrchestrator:
     """Coordinate agent outputs and expose typed orchestration helpers."""
 
-    def __init__(self, llm: LLM, progress_display: Any = None, verbose: bool = False) -> None:
-        self.llm = llm
+    def __init__(
+        self,
+        llm_factory: LLMFactory,
+        progress_display: Any = None,
+        verbose: bool = False,
+    ) -> None:
+        self.llm_factory = llm_factory
         self.progress_display = progress_display
         self.verbose = verbose
-        self.director = DirectorAgent(llm)
-        self.researcher = ResearchAgent(llm)
-        self.scriptwriter = ScriptwriterAgent(llm)
-        self.reviewer = ReviewerAgent(llm)
-        self.visual_curator = VisualCuratorAgent(llm)
         self.backend = "crewai" if self._crewai_available() else "local"
+
+        # Initialize agents with their respective LLMs
+        self.director = DirectorAgent(
+            self.llm_factory.get_llm_for_agent(AgentName.DIRECTOR)
+        )
+        self.researcher = ResearchAgent(
+            self.llm_factory.get_llm_for_agent(AgentName.RESEARCHER)
+        )
+        self.scriptwriter = ScriptwriterAgent(
+            self.llm_factory.get_llm_for_agent(AgentName.SCRIPTWRITER)
+        )
+        self.reviewer = ReviewerAgent(
+            self.llm_factory.get_llm_for_agent(AgentName.REVIEWER)
+        )
+        self.visual_curator = VisualCuratorAgent(
+            self.llm_factory.get_llm_for_agent(AgentName.VISUAL_CURATOR)
+        )
 
     def prepare_brief(self, title: str, duration: int, language: str, video_format: str) -> VideoBrief:
         brief = self.director.prepare_brief(title, duration, language, video_format)

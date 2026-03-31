@@ -39,6 +39,16 @@ class BaseAgent(ABC):
     def backstory(self) -> str:
         """Return the backstory of this agent."""
 
+    @property
+    def agent_name(self) -> str:
+        """Return the agent's name for configuration mapping."""
+        # Convert class name (e.g., "ScriptwriterAgent") to config key ("scriptwriter")
+        name = self.__class__.__name__.replace("Agent", "").lower()
+        # Handle special cases
+        if name == "visualcurator":
+            return "visual_curator"
+        return name
+
     def _generate(self, prompt: str) -> str:
         if hasattr(self.llm, "provider"):
             return self.llm.provider.generate(prompt)
