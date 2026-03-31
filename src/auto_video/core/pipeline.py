@@ -1470,9 +1470,6 @@ class VideoPipeline:
                             keywords.append(keyword)
                 clips = [Path(asset.path) for scene_assets in resolved_assets.values() for asset in scene_assets]
 
-                llm.cleanup()
-                del llm
-
                 completed_steps.append(PipelineStep.VISUALS)
                 state.completed_steps.append(3)
                 state.current_step = max(state.current_step, 4)
