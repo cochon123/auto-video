@@ -43,7 +43,7 @@ image-local = [
     "accelerate>=0.25.0",
 ]
 visual-search = [
-    "duckduckgo-search>=6.0.0",
+    "ddgs>=6.0.0",
 ]
 openrouter = [
     "openai>=1.0.0",

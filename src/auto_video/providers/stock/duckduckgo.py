@@ -47,7 +47,7 @@ class DuckDuckGoProvider(StockProvider):
             DuckDuckGoError: If the search fails.
         """
         try:
-            from duckduckgo_search import DDGS
+            from ddgs import DDGS
         except ImportError:
             logger.warning(
                 "[DuckDuckGo] Optional dependency missing. Install auto-video[visual-search] to enable it."
@@ -147,7 +147,7 @@ class DuckDuckGoProvider(StockProvider):
             True if service is healthy, False otherwise.
         """
         try:
-            from duckduckgo_search import DDGS
+            from ddgs import DDGS
 
             with DDGS() as ddgs:
                 results = list(ddgs.images("test", max_results=1))
