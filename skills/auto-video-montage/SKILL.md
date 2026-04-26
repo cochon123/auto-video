@@ -26,7 +26,7 @@ OmniVoice (local TTS) uses ~1.9GB VRAM. These rules prevent OOM crashes:
 3. **Call `torch.cuda.empty_cache()`** between GPU tasks
 4. **If OmniVoice fails** (OOM, CUDA error), fall back to edge-tts:
    ```bash
-   python3 ~/.config/auto-video/helpers/tts-generate.sh --provider edge --text "..." --output audio.wav
+   python3 ~/.config/auto-video/helpers/tts-generate.py --provider edge --text "..." --output audio.wav
    ```
 5. **edge-tts** uses NO GPU — it's an HTTP API. Always safe to run in parallel with non-GPU tasks.
 
@@ -143,7 +143,7 @@ For scenes with `render_method: "remotion"`:
 2. Load the `remotion-best-practices` skill for composition patterns
 3. For each Remotion scene, render with:
    ```bash
-   python3 ~/.config/auto-video/helpers/video-compose.sh \
+   python3 ~/.config/auto-video/helpers/video-compose.py \
      --method remotion \
      --scenario <cache_dir>/scenario.json \
      --audio-dir <cache_dir>/audio/ \
@@ -167,7 +167,7 @@ The helper handles:
 4. **Final concat**: Merge all scene clips into one video
 
 ```bash
-python3 ~/.config/auto-video/helpers/video-compose.sh \
+python3 ~/.config/auto-video/helpers/video-compose.py \
   --method ffmpeg \
   --scenario <cache_dir>/scenario.json \
   --audio-dir <cache_dir>/audio/ \

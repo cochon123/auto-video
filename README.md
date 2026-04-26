@@ -176,10 +176,11 @@ auto-video/
     auto-video-typography/SKILL.md
     shared/
       helpers/
-        fetch-media.sh
-        tts-generate.sh
-        tts-timestamps.sh
-        video-compose.sh
+        fetch-media.py
+        tts-generate.py
+        tts-timestamps.py
+        video-compose.py
+        recalibrate-timestamps.py
       templates/
         config.yaml.example
         remotion-templates/

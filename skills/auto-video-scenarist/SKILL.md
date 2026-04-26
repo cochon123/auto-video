@@ -332,8 +332,8 @@ Match the topic to a visual style:
 ## Step 5: Output
 
 Return the complete scenario JSON to the director. This becomes the production blueprint used by:
-1. `fetch-media.sh` — to download all assets
-2. `tts-generate.sh` — to generate audio per scene
+1. `fetch-media.py` — to download all assets
+2. `tts-generate.py` — to generate audio per scene
 3. The montage skill — to assemble everything (including typography overlays based on subtitle_mode)
 
 ## Important

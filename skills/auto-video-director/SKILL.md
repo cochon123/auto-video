@@ -91,7 +91,7 @@ The scenarist returns a **scenario** (JSON with scene timing, asset queries, vis
 
 Use the fetch helper for each scene's asset requests:
 ```bash
-python3 ~/.config/auto-video/helpers/fetch-media.sh \
+python3 ~/.config/auto-video/helpers/fetch-media.py \
   --query "artificial intelligence robot" \
   --source pexels \
   --type video \
@@ -102,7 +102,7 @@ python3 ~/.config/auto-video/helpers/fetch-media.sh \
 
 Generate narration audio. Audio files are output as `.wav` (OmniVoice outputs 24kHz WAV):
 ```bash
-python3 ~/.config/auto-video/helpers/tts-generate.sh \
+python3 ~/.config/auto-video/helpers/tts-generate.py \
   --input scenario.json \
   --output-dir ~/.config/auto-video/cache/<video-id>/audio/ \
   --config ~/.config/auto-video/config.yaml
@@ -118,7 +118,7 @@ The helper reads `provider`, `instruct`, and `voice` from config. Override per-r
 
 Extract word-level timestamps from generated audio:
 ```bash
-python3 ~/.config/auto-video/helpers/tts-timestamps.sh \
+python3 ~/.config/auto-video/helpers/tts-timestamps.py \
   --audio-dir ~/.config/auto-video/cache/<video-id>/audio/ \
   --output ~/.config/auto-video/cache/<video-id>/timestamps.json \
   --config ~/.config/auto-video/config.yaml
@@ -133,7 +133,7 @@ python3 ~/.config/auto-video/helpers/tts-timestamps.sh \
 After Whisper extracts word-level timestamps, recalibrate the scenario's phrase_groups to match actual audio timing. This fixes the progressive audio/text drift caused by AI timestamp estimation.
 
 ```bash
-python3 ~/.config/auto-video/helpers/recalibrate-timestamps.sh \
+python3 ~/.config/auto-video/helpers/recalibrate-timestamps.py \
   --scenario ~/.config/auto-video/cache/<video-id>/scenario.json \
   --timestamps ~/.config/auto-video/cache/<video-id>/timestamps.json \
   --audio-dir ~/.config/auto-video/cache/<video-id>/audio/ \
@@ -195,16 +195,16 @@ User Request
 [Scenarist Skill] ──► produces scenario JSON with phrase_groups + subtitle_mode
     │
     ▼
-[fetch-media.sh] ──► downloads/generates all media assets
+[fetch-media.py] ──► downloads/generates all media assets
     │
     ▼
-[tts-generate.sh] ──► generates narration audio (OmniVoice, or edge/API)
+[tts-generate.py] ──► generates narration audio (OmniVoice, or edge/API)
     │                     WARNING: GPU task - runs ALONE
     ▼
-[tts-timestamps.sh] ──► extracts word-level timing
+[tts-timestamps.py] ──► extracts word-level timing
     │                     WARNING: GPU task - runs AFTER TTS is unloaded
     ▼
-[recalibrate-timestamps.sh] ──► aligns phrase_groups to actual audio timing
+[recalibrate-timestamps.py] ──► aligns phrase_groups to actual audio timing
     │
     ▼
 [Montage Skill] ──► validates assets -> assembles final video

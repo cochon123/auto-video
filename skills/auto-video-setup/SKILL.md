@@ -54,11 +54,11 @@ Based on their answer:
 - Ask which services. Default options: **Pexels** (artistic/stock), **DuckDuckGo** (factual/photo-only), **Pixabay**.
 - For Pexels/Pixabay: ask for API key. Test with:
   ```bash
-  python3 ~/.config/auto-video/helpers/fetch-media.sh --test pexels --api-key <KEY>
+  python3 ~/.config/auto-video/helpers/fetch-media.py --test pexels --api-key <KEY>
   ```
 - For DuckDuckGo: no key needed, just test:
   ```bash
-  python3 ~/.config/auto-video/helpers/fetch-media.sh --test duckduckgo
+  python3 ~/.config/auto-video/helpers/fetch-media.py --test duckduckgo
   ```
 
 #### If local folder selected:
@@ -93,7 +93,7 @@ Based on their answer:
 - Check GPU VRAM: `nvidia-smi --query-gpu=memory.total --format=csv,noheader`. If < 2GB, recommend Edge TTS instead.
 - Test: generate sample audio (24kHz WAV) and save to `~/Downloads/tts_test.wav`:
   ```bash
-  python3 ~/.config/auto-video/helpers/tts-generate.sh \
+  python3 ~/.config/auto-video/helpers/tts-generate.py \
     --text "Hello world, let's vibe edit a video" \
     --output ~/Downloads/tts_test.wav \
     --provider omnivoice \
@@ -106,7 +106,7 @@ Based on their answer:
 - Ask for the voice name (default: `en-US-AvaNeural` for English, `fr-FR-DeniseNeural` for French).
 - Test:
   ```bash
-  python3 ~/.config/auto-video/helpers/tts-generate.sh \
+  python3 ~/.config/auto-video/helpers/tts-generate.py \
     --text "Hello world, let's vibe edit a video" \
     --output ~/Downloads/tts_test.wav \
     --provider edge --voice "<voice>"
@@ -118,7 +118,7 @@ Based on their answer:
 - Ask for API key and preferred voice.
 - Test: generate "Hello world, let's vibe edit a video" and save to `~/Downloads/tts_test.wav`:
   ```bash
-  python3 ~/.config/auto-video/helpers/tts-generate.sh \
+  python3 ~/.config/auto-video/helpers/tts-generate.py \
     --text "Hello world, let's vibe edit a video" \
     --output ~/Downloads/tts_test.wav \
     --provider <provider> --api-key <KEY> --voice <voice>
@@ -218,8 +218,8 @@ chmod +x ~/.config/auto-video/helpers/*
 
 Run a full integration test:
 ```bash
-python3 ~/.config/auto-video/helpers/fetch-media.sh --test-all
-python3 ~/.config/auto-video/helpers/tts-generate.sh --test --config ~/.config/auto-video/config.yaml
+python3 ~/.config/auto-video/helpers/fetch-media.py --test-all
+python3 ~/.config/auto-video/helpers/tts-generate.py --test --config ~/.config/auto-video/config.yaml
 ```
 
 If Remotion enabled:
