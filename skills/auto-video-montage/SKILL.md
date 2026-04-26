@@ -128,7 +128,7 @@ for f in sorted(media_dir.iterdir()):
     else: issues.append(f'{w}x{h} OK')
     
     status = 'X' if 'X' in ' '.join(issues) else 'OK'
-    print(f'{status} {f.name}: {\" | \".join(issues)} | {dur:.1f}s')
+    print(f'{status} {f.name}: {" | ".join(issues)} | {dur:.1f}s')
 " <cache_dir>/media/ 30 1920 1080
 ```
 
@@ -177,12 +177,36 @@ python3 ~/.config/auto-video/helpers/video-compose.sh \
   --config ~/.config/auto-video/config.yaml
 ```
 
-## Step 4: Typography setup (if cinematic mode)
+## Step 4: Typography (for all subtitle modes)
 
-If the scenario has `style_mode: "cinematic"`:
-1. Load the `auto-video-typography` skill
-2. For each scene with `text_position` and `text_size`, get typography config
-3. Apply typography during assembly (Remotion component or FFmpeg overlay)
+The scenario has a `subtitle_mode` field (dramatic, simple, or educational). Typography is needed for ALL modes:
+
+### Load the typography skill
+
+For ALL scenarios (regardless of subtitle_mode), load the `auto-video-typography` skill:
+
+```bash
+# Pass the entire scenario, the typography skill will read subtitle_mode
+# No need to pass mode separately
+```
+
+### Typography mode behaviors
+
+| Mode | When typography is applied | What it does |
+|------|---------------------------|--------------|
+| **dramatic** | All scenes | Full-screen text with fonts, animations, epic sizing |
+| **simple** | All scenes | Bottom subtitles with dark background, clean sans-serif |
+| **educational** | All scenes | Center-highlighted terms with emphasis, bold/underline |
+
+### Apply typography during assembly
+
+- For FFmpeg: typography skill returns drawtext filters appropriate to mode
+- For Remotion: typography skill provides the right component (TypographyScene, SubtitleOverlay, or TermHighlight)
+- The `text_position` and `text_size` fields from each scene guide the typography skill
+
+### No typography?
+
+If `subtitle_mode` is absent or malformed, default to **simple** (bottom subtitles).
 
 ## Step 5: FFmpeg montage details (for manual work or troubleshooting)
 
@@ -208,10 +232,19 @@ ffmpeg -i clip1.mp4 -i clip2.mp4 \
   -c:v libx264 -preset slow -crf 18 output.mp4
 ```
 
-### Add subtitles
+### Add subtitles (simple mode)
+
+For simple subtitle mode with FFmpeg:
+
 ```bash
-ffmpeg -i video.mp4 -vf "subtitles=subs.srt:force_style='FontSize=24,PrimaryColour=&Hffffff&'" \
-  -c:v libx264 -preset slow -crf 18 output_with_subs.mp4
+ffmpeg -i video.mp4 -vf "subtitles=subs.srt:force_style='FontSize=24,PrimaryColour=&Hffffff&'" -c:v libx264 output_with_subs.mp4
+```
+
+For more control, use drawtext directly (typography skill provides the filter):
+
+```bash
+# Simple bottom subtitle with dark background
+ffmpeg -i video.mp4 -vf "drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf:text='PHRASE':fontsize=44:x=(w-text_w)/2:y=h-120:fontcolor=white:box=1:boxcolor=black@0.7:boxborderw=10" -c:v libx264 output.mp4
 ```
 
 ## Step 6: Quality check
@@ -235,6 +268,6 @@ When the user requests changes via timestamps:
 1. **"At 0:XX, change the image"** → identify scene → re-fetch media → re-render that scene clip → re-concat
 2. **"Shorten the intro"** → adjust scenario timing → re-render affected scenes → re-concat
 3. **"Add transition at 0:XX"** → find the scene boundary → adjust concat filter → re-concat
-4. **"Change narration at 0:XX"** → re-run TTS for that scene (uses OmniVoice instruct from config) → update timestamps → re-render → re-concat
+4. **"Change narration at 0:XX"** → re-run TTS for that scene → update timestamps → typography adjusts based on `subtitle_mode` → re-render → re-concat
 
 For small edits, you only need to re-process affected scenes and re-concat, not the entire video.

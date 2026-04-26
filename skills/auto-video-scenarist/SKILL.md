@@ -17,31 +17,85 @@ From the director:
 - `media_config` — from config.yaml (available sources, generation settings)
 - `format` — short/long
 
-## Step 0: Detect cinematic mode
+## Step 0: Detect subtitle mode
 
-Before processing scenes, determine whether the video should use **cinematic** or **standard** style mode.
+Determine which subtitle mode to use based on the video's purpose and content.
 
-### Cinematic mode indicators
+### Mode detection rules
 
-Turn cinematic mode ON when ANY of these apply:
-- User explicitly says "cinematic", "film", "movie-style", "cinématique"
-- Script tone is "dramatic"
-- Topic is artistic, emotional, philosophical, storytelling
-- User mentions "typography", "text overlay", "quote style"
+| Mode | When to use | Indicators |
+|------|-------------|------------|
+| **dramatic** | Cinematic, artistic, emotional, storytelling | User says "cinematic", "film", "dramatic", "movie-style"; tone is "dramatic"; topic is artistic/philosophical; user mentions "typography", "text overlay" |
+| **simple** | Informational, news, factual updates | User says "information", "news", "update", "factual"; tone is "informative"; topic is tech/business news, data, facts |
+| **educational** | Learning, explaining concepts, highlighting terms | User says "education", "teach", "explain", "tutorial"; tone is "educational"; topic includes technical terms, concepts to define |
 
-Otherwise, use **standard** mode.
+### Mode behavior table
 
-### Mode behavior
+| Feature | dramatic | simple | educational |
+|---------|----------|--------|-------------|
+| `subtitle_mode` field | `"dramatic"` | `"simple"` | `"educational"` |
+| `phrase_groups` style | Short, punchy (2-6 words) for dramatic pacing | Full sentences, natural pauses | Key terms, difficult words, concepts |
+| `text_position` | Varies per scene: "left", "center", "right", "bottom" | Always "bottom" (subtitles) | "center" with highlight |
+| `text_size` | "epic", "large", "medium", "small" | "medium" (readable) | "large" (emphasized) |
+| Typography skill | Full cinematic fonts + animations | Simple sans-serif, minimal animation | Highlighted terms, bold/underline |
+| Visual emphasis | Text IS the visual (full screen text) | Text supports visual (subtitles below) | Text reinforces learning (terms highlighted) |
 
-| Feature | Cinematic ON | Cinematic OFF (Standard) |
-|---------|-------------|--------------------------|
-| `style_mode` field | `"cinematic"` | `"standard"` |
-| `phrase_groups` | Short, punchy (2-6 words preferred) for dramatic pacing | Sentence-level (full sentences or natural clauses) |
-| `text_position` per scene | Present: "left", "center", "right", "bottom" | Absent |
-| `text_size` per scene | Present: "epic", "large", "medium", "small" | Absent |
-| Typography skill | Invoked by montage | NOT invoked |
+### Phrase group rules per mode
 
-Set the top-level `style_mode` field in the scenario JSON accordingly.
+#### dramatic mode:
+- **Ultra-short phrases**: 2-6 words maximum
+- **Split at emotional beats**: comma, period, dramatic pause
+- **One idea per phrase**: no compound thoughts
+- **Visual rhythm**: phrases drive the visual pace
+- **Timestamps**: allow slight overlap (0.1-0.3s) for smooth transitions
+- **Example**: "Tout commence." → "Une page blanche." → "Et un clavier."
+
+#### simple mode:
+- **Full sentences**: one phrase per complete sentence
+- **Natural pauses**: split only at periods or major clauses
+- **No mid-sentence splits**: "tout commence par une page blanche" is ONE phrase, not two
+- **Subtitle style**: position "bottom", size "medium"
+- **Example**: "Tout commence par une page blanche, et un jeune se lance." → ONE phrase
+
+#### educational mode:
+- **Key terms only**: highlight difficult words, technical terms, concepts
+- **Phrase IS the term**: each phrase is a word or phrase that needs explanation
+- **Position center**: terms appear in center of screen with emphasis
+- **Bold/underline**: use typographic emphasis to draw attention
+- **Example**: If narration explains "l'intelligence artificielle", create phrase: "Intelligence Artificielle" with emphasis
+
+### JSON schema update
+
+Update the scenario JSON schema. Replace `style_mode` with `subtitle_mode`:
+
+```json
+{
+  "video_id": "auto-2026-04-26-topic",
+  "title": "...",
+  "language": "fr",
+  "subtitle_mode": "dramatic" | "simple" | "educational",
+  "total_duration_s": 65,
+  "scenes": [
+    {
+      "scene_id": "scene-1",
+      "type": "intro",
+      "narration": "Spoken text...",
+      "phrase_groups": [
+        { "text": "...", "start": 0.0, "end": 2.0 }
+      ],
+      "text_position": "bottom",  // "simple" mode always "bottom"
+      "text_size": "medium",       // "simple" mode always "medium"
+      "visual": { ... },
+      "assets": [ ... ],
+      "transition": "fade"
+    }
+  ]
+}
+```
+
+### Per-scene subtitle mode
+
+If you detect that a specific scene needs a DIFFERENT subtitle mode (e.g., a definition in an informational video), you can override `text_position` and `text_size` per scene. But the global `subtitle_mode` field should reflect the PRIMARY mode.
 
 ## Step 1: Analyze each scene
 
@@ -115,9 +169,11 @@ For each scene, divide the narration into `phrase_groups`. Phrase groups drive s
 
 ### Pacing by mode
 
-**Cinematic mode:** prefer 2-6 words per group for dramatic, punchy pacing. Short phrases create visual rhythm and allow large cinematic typography.
+**Dramatic mode:** prefer 2-6 words per group for dramatic, punchy pacing. Short phrases create visual rhythm and allow large cinematic typography.
 
-**Standard mode:** sentence-level or clause-level groups are fine. One group per sentence or per natural pause.
+**Simple mode:** sentence-level or clause-level groups are fine. One group per sentence or per natural pause. Position "bottom", size "medium".
+
+**Educational mode:** highlight key terms only. Each phrase is a term that needs explanation. Position "center", size "large" with emphasis.
 
 ### Timestamp estimation
 
@@ -132,12 +188,22 @@ Estimate timestamps proportional to word count within the scene duration:
 Given narration: "Tout commence par une page blanche. Un jeune, une idée, et un clavier."
 Scene duration: 0.0s → 4.97s.
 
+**Dramatic mode:**
 ```json
 "phrase_groups": [
-  { "text": "Tout commence par une page blanche.", "start": 0.0, "end": 2.17 },
+  { "text": "Tout commence.", "start": 0.0, "end": 1.0 },
+  { "text": "Une page blanche.", "start": 1.0, "end": 2.17 },
   { "text": "Un jeune,", "start": 2.17, "end": 3.0 },
   { "text": "une idée,", "start": 3.0, "end": 3.8 },
   { "text": "et un clavier.", "start": 3.8, "end": 4.97 }
+]
+```
+
+**Simple mode:**
+```json
+"phrase_groups": [
+  { "text": "Tout commence par une page blanche.", "start": 0.0, "end": 2.17 },
+  { "text": "Un jeune, une idée, et un clavier.", "start": 2.17, "end": 4.97 }
 ]
 ```
 
@@ -150,7 +216,7 @@ Scene duration: 0.0s → 4.97s.
   "video_id": "auto-2026-04-23-topic",
   "title": "...",
   "language": "fr",
-  "style_mode": "cinematic",
+  "subtitle_mode": "dramatic",
   "total_duration_s": 65,
   "default_style": {
     "graphic_style": "tech-noir",
@@ -172,7 +238,8 @@ Scene duration: 0.0s → 4.97s.
       "end_s": 12.0,
       "narration": "Tout commence par une page blanche. Un jeune, une idée, et un clavier.",
       "phrase_groups": [
-        { "text": "Tout commence par une page blanche.", "start": 0.0, "end": 2.17 },
+        { "text": "Tout commence.", "start": 0.0, "end": 1.0 },
+        { "text": "Une page blanche.", "start": 1.0, "end": 2.17 },
         { "text": "Un jeune,", "start": 2.17, "end": 3.0 },
         { "text": "une idée,", "start": 3.0, "end": 3.8 },
         { "text": "et un clavier.", "start": 3.8, "end": 4.97 }
@@ -217,16 +284,18 @@ Scene duration: 0.0s → 4.97s.
 }
 ```
 
-### Cinematic fields (only when `style_mode` is `"cinematic"`)
+### Text overlay fields (behavior varies by `subtitle_mode`)
 
-When cinematic mode is ON, add these fields to each scene:
+The `text_position` and `text_size` fields are present for all modes, but their behavior differs:
 
-| Field | Values | Purpose |
-|-------|--------|---------|
-| `text_position` | `"left"`, `"center"`, `"right"`, `"bottom"` | Where the typography overlay appears |
-| `text_size` | `"epic"`, `"large"`, `"medium"`, `"small"` | Font scale for dramatic effect |
+| Field | Values | Purpose by mode |
+|-------|--------|-----------------|
+| `text_position` | `"left"`, `"center"`, `"right"`, `"bottom"` | **dramatic**: varies per scene for visual interest; **simple**: always `"bottom"` (subtitles); **educational**: `"center"` for term emphasis |
+| `text_size` | `"epic"`, `"large"`, `"medium"`, `"small"` | **dramatic**: varies per scene; **simple**: always `"medium"` (readable subtitles); **educational**: `"large"` for emphasis |
 
-Guidelines for assigning cinematic fields:
+Guidelines for assigning text overlay fields:
+
+**Dramatic mode:**
 - **Intro scenes**: `"text_position": "center"`, `"text_size": "epic"`
 - **Key reveal/punchline scenes**: `"text_position": "left"` or `"center"`, `"text_size": "large"` or `"epic"`
 - **Supporting content**: `"text_position": "left"` or `"right"`, `"text_size": "medium"`
@@ -234,7 +303,12 @@ Guidelines for assigning cinematic fields:
 - Vary positions across consecutive scenes for visual interest
 - When a scene has strong imagery, use `"left"` or `"right"` to avoid obscuring visuals
 
-These fields MUST be absent when `style_mode` is `"standard"`.
+**Simple mode:**
+- All scenes: `"text_position": "bottom"`, `"text_size": "medium"`
+
+**Educational mode:**
+- All scenes with terms: `"text_position": "center"`, `"text_size": "large"`
+- Use bold/underline emphasis in the typography skill for highlighted terms
 
 ### Style profile selection
 
@@ -260,7 +334,7 @@ Match the topic to a visual style:
 Return the complete scenario JSON to the director. This becomes the production blueprint used by:
 1. `fetch-media.sh` — to download all assets
 2. `tts-generate.sh` — to generate audio per scene
-3. The montage skill — to assemble everything (including typography overlays when cinematic)
+3. The montage skill — to assemble everything (including typography overlays based on subtitle_mode)
 
 ## Important
 
@@ -269,5 +343,5 @@ Return the complete scenario JSON to the director. This becomes the production b
 - Total duration must match the sum of scene durations
 - Scene order must be sequential with no gaps
 - Prefer variety: don't use the same visual mode for more than 3 consecutive scenes
-- `text_position` and `text_size` are ONLY present when `style_mode` is `"cinematic"`
+- `text_position` and `text_size` behavior depends on `subtitle_mode`
 - Phrase group timestamps must fit within the scene's `start_s` and `end_s` bounds

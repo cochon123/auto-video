@@ -41,21 +41,26 @@ Analyze the user's request and determine:
 | **Topic** | extracted from request | required |
 | **Script** | user-provided or AI-generated | AI-generated |
 | **Sector** | `tech`, `politics`, `science`, `culture`, etc. | `tech` |
-| **Style mode** | `cinematic` or `standard` | `standard` |
+| **Subtitle mode** | `dramatic`, `simple`, or `educational` | `simple` |
 
-### Style mode detection
+### Subtitle mode detection
 
-**Cinematic mode indicators:**
-- User says "cinematic", "film", "movie-style", "cinematique"
-- Tone is `dramatic`
-- Topic is artistic, emotional, philosophical, storytelling
-- User mentions "typography", "text overlay", "quote style"
+**dramatic mode indicators:**
+- User says "cinematic", "film", "dramatic", "movie-style", "typography"
+- Tone is "dramatic"
+- Topic is artistic, philosophical, storytelling
 
-When `style_mode: cinematic`:
-- Heavier use of typography and text overlays
-- `phrase_groups` drive text overlay placement
-- Remotion is preferred over FFmpeg
-- Typography skill is loaded by montage as a sub-skill
+**simple mode indicators:**
+- User says "information", "news", "update", "factual"
+- Tone is "informative"
+- Topic is tech/business news, data, facts
+
+**educational mode indicators:**
+- User says "education", "teach", "explain", "tutorial"
+- Tone is "educational"
+- Topic includes technical terms, concepts to define
+
+If no indicators, default to `simple`.
 
 Ask clarifying questions ONLY if the request is ambiguous. Otherwise, proceed with defaults.
 
@@ -78,7 +83,7 @@ Load the `auto-video-scenarist` skill as a sub-agent. Pass:
 - the script
 - media config (from config.yaml)
 - format info
-- `style_mode` (`cinematic`/`standard`) — affects `phrase_group` granularity and whether `text_position`/`text_size` are included in the scenario
+- `subtitle_mode` (dramatic/simple/educational) — affects phrase_group granularity and text positioning/sizing
 
 The scenarist returns a **scenario** (JSON with scene timing, asset queries, visual plans, phrase_groups).
 
@@ -128,9 +133,12 @@ python3 ~/.config/auto-video/helpers/tts-timestamps.sh \
 Load the `auto-video-montage` skill as a sub-agent. Pass:
 - scenario, media files, audio files, timestamps
 - remotion config (enabled/disabled)
-- `style_mode` (`cinematic`/`standard`)
+- `subtitle_mode` (dramatic/simple/educational)
 
-When `style_mode: cinematic`, the montage skill loads the `auto-video-typography` sub-skill to generate cinematic text overlays driven by `phrase_groups`. This is not a separate pipeline step — typography is handled internally by montage.
+Typography skill is invoked by montage for all subtitle modes:
+- dramatic: full cinematic typography with fonts + animations
+- simple: minimal bottom subtitles with clean sans-serif
+- educational: center-highlighted terms with emphasis
 
 The montage skill produces the final video.
 
@@ -157,26 +165,26 @@ When the user requests changes:
 User Request
     │
     ▼
-[Intent Analysis] ──► determine: mode, tone, format, topic, style_mode
+[Intent Analysis] ──► determine: mode, tone, format, topic, subtitle_mode
     │
     ▼
 [Writer Skill] ──► generates script (if not provided)
     │
     ▼
-[Scenarist Skill] ──► produces scenario JSON with phrase_groups + visual plans + asset queries
+[Scenarist Skill] ──► produces scenario JSON with phrase_groups + subtitle_mode
     │
     ▼
 [fetch-media.sh] ──► downloads/generates all media assets
     │
     ▼
-[tts-generate.sh] ──► generates narration audio per scene (OmniVoice 24kHz, or edge/API)
-    │                            WARNING: GPU task - runs ALONE
+[tts-generate.sh] ──► generates narration audio (OmniVoice, or edge/API)
+    │                     WARNING: GPU task - runs ALONE
     ▼
 [tts-timestamps.sh] ──► extracts word-level timing
-    │                            WARNING: GPU task - runs AFTER TTS is unloaded
+    │                     WARNING: GPU task - runs AFTER TTS is unloaded
     ▼
 [Montage Skill] ──► validates assets -> assembles final video
-    │  +- [Typography Skill] ──► cinematic text overlays (only if style_mode=cinematic)
+    │  +- [Typography Skill] ──► text overlays (invoked based on subtitle_mode)
     │
     ▼
 Final Video ──► user reviews ──► feedback loop
