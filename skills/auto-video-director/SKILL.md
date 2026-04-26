@@ -128,6 +128,27 @@ python3 ~/.config/auto-video/helpers/tts-timestamps.sh \
 > This step MUST run AFTER TTS is fully unloaded, never alongside it.
 > If Whisper fails after an OmniVoice fallback to edge-tts, retry — edge-tts output is still valid input for Whisper.
 
+### Recalibrate timestamps
+
+After Whisper extracts word-level timestamps, recalibrate the scenario's phrase_groups to match actual audio timing. This fixes the progressive audio/text drift caused by AI timestamp estimation.
+
+```bash
+python3 ~/.config/auto-video/helpers/recalibrate-timestamps.sh \
+  --scenario ~/.config/auto-video/cache/<video-id>/scenario.json \
+  --timestamps ~/.config/auto-video/cache/<video-id>/timestamps.json \
+  --audio-dir ~/.config/auto-video/cache/<video-id>/audio/ \
+  --verbose
+```
+
+This step:
+1. Matches each phrase_group text to Whisper words
+2. Replaces AI-estimated timestamps with actual audio timestamps (scene-relative)
+3. Falls back to proportional rescaling when matching fails
+4. Recalculates scene start/end times from actual audio durations
+5. Creates a backup of the original scenario.json
+
+This is CRITICAL for sync quality. Without it, phrase_groups use AI-estimated timing that drifts progressively from actual narration.
+
 ### Delegate to montage
 
 Load the `auto-video-montage` skill as a sub-agent. Pass:
@@ -182,6 +203,9 @@ User Request
     ▼
 [tts-timestamps.sh] ──► extracts word-level timing
     │                     WARNING: GPU task - runs AFTER TTS is unloaded
+    ▼
+[recalibrate-timestamps.sh] ──► aligns phrase_groups to actual audio timing
+    │
     ▼
 [Montage Skill] ──► validates assets -> assembles final video
     │  +- [Typography Skill] ──► text overlays (invoked based on subtitle_mode)
