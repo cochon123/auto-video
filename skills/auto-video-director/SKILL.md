@@ -4,7 +4,7 @@ Main orchestration skill for video generation. This is the skill the user intera
 
 ## When to use
 
-When the user asks to create, generate, or edit a video. Triggers: "make a video", "create a video", "generate a video", "vibe edit", "auto-video", "montage".
+When the user asks to create, generate, or edit a video. Triggers: "make a video", "create a video", "generate a video", "vibe edit", "auto-video", "montage", "upload to youtube", "publish video".
 
 ## Prerequisites
 
@@ -26,7 +26,7 @@ You are the director of an automated video production pipeline. You:
 cat ~/.config/auto-video/config.yaml
 ```
 
-Extract: media mode, TTS settings, remotion enabled, default language, default format.
+Extract: media mode, TTS settings, remotion enabled, YouTube enabled, default language, default format.
 
 ## Step 2: Identify user intent
 
@@ -42,6 +42,7 @@ Analyze the user's request and determine:
 | **Script** | user-provided or AI-generated | AI-generated |
 | **Sector** | `tech`, `politics`, `science`, `culture`, etc. | `tech` |
 | **Subtitle mode** | `dramatic`, `simple`, or `educational` | `simple` |
+| **Upload** | `none`, `youtube` | `none` |
 
 ### Subtitle mode detection
 
@@ -77,19 +78,22 @@ The writer returns a **script** (text with scene breakdown).
 
 Use the user's script directly.
 
-### Delegate to scenarist
+### Delegate to scenarist (visual pass)
 
 Load the `auto-video-scenarist` skill as a sub-agent. Pass:
 - the script
 - media config (from config.yaml)
 - format info
-- `subtitle_mode` (dramatic/simple/educational) — affects phrase_group granularity and text positioning/sizing
+- `subtitle_mode` (dramatic/simple/educational) — affects phrase_texts granularity and text positioning/sizing
 
-The scenarist returns a **scenario** (JSON with scene timing, asset queries, visual plans, phrase_groups).
+The scenarist returns a **visual scenario** (JSON with scenes, assets, visual plans, phrase_texts — NO timestamps).
 
-### Execute media fetch
+### Execute media fetch + TTS in parallel
 
-Use the fetch helper for each scene's asset requests:
+These two steps are independent and can run concurrently:
+
+#### Media fetch (CPU/network)
+
 ```bash
 python3 ~/.config/auto-video/helpers/fetch-media.py \
   --query "artificial intelligence robot" \
@@ -98,7 +102,7 @@ python3 ~/.config/auto-video/helpers/fetch-media.py \
   --output-dir ~/.config/auto-video/cache/<video-id>/media/
 ```
 
-### Execute TTS
+#### TTS generation (GPU)
 
 Generate narration audio. Audio files are output as `.wav` (OmniVoice outputs 24kHz WAV):
 ```bash
@@ -114,9 +118,10 @@ The helper reads `provider`, `instruct`, and `voice` from config. Override per-r
 > They MUST run one at a time, never in parallel.
 > If OmniVoice fails, fall back to `edge-tts` (no GPU needed).
 
-### Get timestamps
+### Get timestamps (after TTS completes)
 
 Extract word-level timestamps from generated audio:
+
 ```bash
 python3 ~/.config/auto-video/helpers/tts-timestamps.py \
   --audio-dir ~/.config/auto-video/cache/<video-id>/audio/ \
@@ -128,12 +133,12 @@ python3 ~/.config/auto-video/helpers/tts-timestamps.py \
 > This step MUST run AFTER TTS is fully unloaded, never alongside it.
 > If Whisper fails after an OmniVoice fallback to edge-tts, retry — edge-tts output is still valid input for Whisper.
 
-### Recalibrate timestamps
+### Build phrase groups with real timestamps
 
-After Whisper extracts word-level timestamps, recalibrate the scenario's phrase_groups to match actual audio timing. This fixes the progressive audio/text drift caused by AI timestamp estimation.
+After timestamps are extracted, convert phrase_texts into phrase_groups with actual audio timing:
 
 ```bash
-python3 ~/.config/auto-video/helpers/recalibrate-timestamps.py \
+python3 ~/.config/auto-video/helpers/build-phrase-groups.py \
   --scenario ~/.config/auto-video/cache/<video-id>/scenario.json \
   --timestamps ~/.config/auto-video/cache/<video-id>/timestamps.json \
   --audio-dir ~/.config/auto-video/cache/<video-id>/audio/ \
@@ -141,18 +146,19 @@ python3 ~/.config/auto-video/helpers/recalibrate-timestamps.py \
 ```
 
 This step:
-1. Matches each phrase_group text to Whisper words
-2. Replaces AI-estimated timestamps with actual audio timestamps (scene-relative)
-3. Falls back to proportional rescaling when matching fails
-4. Recalculates scene start/end times from actual audio durations
+1. Matches each phrase_text to Whisper words
+2. Assigns real audio timestamps (scene-relative) to each phrase
+3. Calculates scene `start_s`/`end_s` from actual audio durations
+4. Replaces `phrase_texts` with `phrase_groups` (text + start + end)
 5. Creates a backup of the original scenario.json
 
-This is CRITICAL for sync quality. Without it, phrase_groups use AI-estimated timing that drifts progressively from actual narration.
+This produces the final scenario with accurate timing — no estimation, no drift.
 
 ### Delegate to montage
 
 Load the `auto-video-montage` skill as a sub-agent. Pass:
-- scenario, media files, audio files, timestamps
+- scenario (now with real timestamps and phrase_groups)
+- media files, audio files
 - remotion config (enabled/disabled)
 - `subtitle_mode` (dramatic/simple/educational)
 
@@ -180,39 +186,75 @@ When the user requests changes:
 3. Re-run only the affected pipeline steps
 4. Re-assemble the video
 
+## Step 5: Upload to YouTube (optional)
+
+If the user requested YouTube upload (either in the initial request or after delivery), and YouTube is enabled in config:
+
+1. Load the `auto-video-youtube` skill for reference.
+2. Build upload metadata from the pipeline:
+   - `title`: the video topic or user-specified title (max 100 chars)
+   - `description`: auto-generated from the script summary + "Generated with auto-video"
+   - `tags`: extracted from topic and sector keywords
+   - `privacy`: from config `youtube.default_privacy` or user override
+   - `category_id`: auto-detected from sector (see youtube skill), or from config
+   - `license`: from config `youtube.default_license`
+3. Run the upload:
+   ```bash
+   python3 ~/.config/auto-video/helpers/youtube-upload.py upload \
+     --config ~/.config/auto-video/config.yaml \
+     --title "<title>" \
+     --description "<description>" \
+     --tags "<comma-separated tags>" \
+     --privacy <private|unlisted|public> \
+     --json \
+     <video_path>
+   ```
+4. Report the result to the user with the video URL.
+
+If YouTube is not enabled in config:
+> YouTube uploads are not configured. Run auto-video-setup to enable them, or say "setup YouTube upload".
+
 ## Pipeline summary
 
 ```
 User Request
     │
     ▼
-[Intent Analysis] ──► determine: mode, tone, format, topic, subtitle_mode
+[Intent Analysis] ──► determine: mode, tone, format, topic, subtitle_mode, upload
     │
     ▼
 [Writer Skill] ──► generates script (if not provided)
     │
     ▼
-[Scenarist Skill] ──► produces scenario JSON with phrase_groups + subtitle_mode
+[Scenarist Visual Pass] ──► produces visual scenario JSON (phrase_texts, NO timestamps)
     │
-    ▼
-[fetch-media.py] ──► downloads/generates all media assets
+    ├──► [fetch-media.py] ──► downloads/generates media assets (CPU, parallel)
     │
-    ▼
-[tts-generate.py] ──► generates narration audio (OmniVoice, or edge/API)
-    │                     WARNING: GPU task - runs ALONE
-    ▼
-[tts-timestamps.py] ──► extracts word-level timing
-    │                     WARNING: GPU task - runs AFTER TTS is unloaded
-    ▼
-[recalibrate-timestamps.py] ──► aligns phrase_groups to actual audio timing
-    │
-    ▼
+    └──► [tts-generate.py] ──► generates narration audio (GPU, sequential)
+              │                     WARNING: GPU task - runs ALONE
+              ▼
+         [tts-timestamps.py] ──► extracts word-level timing (GPU, after TTS)
+              │                     WARNING: GPU task - runs AFTER TTS is unloaded
+              ▼
+         [build-phrase-groups.py] ──► converts phrase_texts → phrase_groups with real timestamps
+              │                           Also sets scene start_s/end_s from audio durations
+              ▼
 [Montage Skill] ──► validates assets -> assembles final video
     │  +- [Typography Skill] ──► text overlays (invoked based on subtitle_mode)
     │
     ▼
 Final Video ──► user reviews ──► feedback loop
+    │
+    ▼ (optional)
+[YouTube Upload] ──► uploads video to YouTube channel
 ```
+
+### Key principle: never estimate what you can measure
+
+The pipeline never asks an AI to guess timestamps. All timing comes from actual audio:
+- `phrase_texts` = how to split text (AI decides this)
+- `phrase_groups` with timestamps = when each phrase occurs (measured from audio)
+- Scene durations = actual TTS output duration (not AI estimates)
 
 ## Error handling
 
@@ -221,3 +263,4 @@ Final Video ──► user reviews ──► feedback loop
 - If media fetch returns no results → try alternate source or generate
 - If TTS fails → check config, re-test; if OmniVoice fails → fall back to edge-tts
 - If Remotion render fails → fall back to FFmpeg mode
+- If YouTube upload fails → show error, suggest running `youtube-upload.py auth` to refresh credentials

@@ -8,7 +8,7 @@ Loaded by the director after all media and audio have been generated. Takes the 
 
 ## Prerequisites
 
-- Scenario JSON from the scenarist
+- Scenario JSON with phrase_groups and real timestamps (from `build-phrase-groups.py`)
 - Media assets downloaded (images/videos in cache)
 - TTS audio files generated (one per scene)
 - Timestamps JSON (word-level timing from audio)
@@ -32,12 +32,13 @@ OmniVoice (local TTS) uses ~1.9GB VRAM. These rules prevent OOM crashes:
 
 ### Pipeline order (respecting GPU):
 ```
-1. [GPU] OmniVoice TTS for all scenes (sequential)
-2. [GPU] Whisper timestamps (sequential, after TTS is done and unloaded)
-3. [CPU] fetch_media (can run while GPU is free)
-4. [GPU] AI image generation if needed (after fetch)
-5. [CPU] Pre-render validation
-6. [CPU] FFmpeg assembly (or [GPU] Remotion render)
+1. [CPU/NET] fetch-media (can run in parallel with TTS)
+2. [GPU] OmniVoice TTS for all scenes (sequential)
+3. [GPU] Whisper timestamps (sequential, after TTS is done and unloaded)
+4. [CPU] build-phrase-groups.py (assigns real timestamps to phrase_texts)
+5. [GPU] AI image generation if needed (after fetch)
+6. [CPU] Pre-render validation
+7. [CPU] FFmpeg assembly (or [GPU] Remotion render)
 ```
 
 ## Step 1: Verify inputs

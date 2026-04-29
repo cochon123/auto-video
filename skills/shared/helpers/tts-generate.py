@@ -31,8 +31,8 @@ def tts_omnivoice(text: str, output_path: str, instruct: str | None = None) -> s
     return output_path
 
 
-def tts_edge(text: str, output_path: str, voice: str = "fr-FR-DeniseNeural", lang: str = "fr") -> str:
-    import subprocess
+def tts_edge(text: str, output_path: str, voice: str = "fr-FR-DeniseNeural", lang: str = "fr") -> tuple[str, list[dict]]:
+    import asyncio
     voice_map = {
         "fr": "fr-FR-DeniseNeural", "en": "en-US-AriaNeural", "en-us": "en-US-AriaNeural",
         "es": "es-ES-ElviraNeural", "de": "de-DE-KatjaNeural", "it": "it-IT-ElsaNeural",
@@ -41,11 +41,24 @@ def tts_edge(text: str, output_path: str, voice: str = "fr-FR-DeniseNeural", lan
     }
     if voice in voice_map:
         voice = voice_map[voice]
-    cmd = ["edge-tts", "--voice", voice, "--text", text, "--write-media", output_path]
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-    if result.returncode != 0:
-        raise RuntimeError(f"edge-tts failed: {result.stderr}")
-    return output_path
+    return asyncio.run(_tts_edge_async(text, output_path, voice))
+
+
+async def _tts_edge_async(text: str, output_path: str, voice: str) -> tuple[str, list[dict]]:
+    import edge_tts
+    communicate = edge_tts.Communicate(text, voice)
+    words = []
+    with open(output_path, "wb") as f:
+        async for chunk in communicate.stream():
+            if chunk["type"] == "audio":
+                f.write(chunk["data"])
+            elif chunk["type"] == "WordBoundary":
+                offset_s = chunk["offset"] / 10_000_000
+                duration_s = chunk["duration"] / 10_000_000
+                w = chunk.get("text", "").strip()
+                if w:
+                    words.append({"word": w, "start": round(offset_s, 3), "end": round(offset_s + duration_s, 3)})
+    return output_path, words
 
 
 def tts_elevenlabs(text: str, output_path: str, api_key: str, voice: str = "Rachel") -> str:
@@ -67,28 +80,32 @@ def tts_openai(text: str, output_path: str, api_key: str, voice: str = "alloy") 
     return output_path
 
 
-def _tts_generate(text: str, output_path: str, provider: str, config: dict) -> str:
+def _tts_generate(text: str, output_path: str, provider: str, config: dict) -> tuple[str, list[dict]]:
     tts_cfg = config.get("tts", {})
     api_key = tts_cfg.get("api_key") or ""
     instruct = tts_cfg.get("instruct", "female, young adult, moderate pitch")
 
     if provider == "omnivoice":
-        return tts_omnivoice(text, output_path, instruct=instruct)
+        tts_omnivoice(text, output_path, instruct=instruct)
+        return output_path, []
     elif provider == "edge":
         voice = tts_cfg.get("voice", "en-US-AriaNeural")
         lang = tts_cfg.get("language", "en")
-        return tts_edge(text, output_path, voice=voice, lang=lang)
+        path, words = tts_edge(text, output_path, voice=voice, lang=lang)
+        return path, words
     elif provider == "elevenlabs":
         voice = tts_cfg.get("voice", "Rachel")
-        return tts_elevenlabs(text, output_path, api_key, voice)
+        tts_elevenlabs(text, output_path, api_key, voice)
+        return output_path, []
     elif provider == "openai":
         voice = tts_cfg.get("voice", "alloy")
-        return tts_openai(text, output_path, api_key, voice)
+        tts_openai(text, output_path, api_key, voice)
+        return output_path, []
     else:
         raise ValueError(f"Unknown TTS provider: {provider}")
 
 
-def generate_from_scenario(scenario_path: str, output_dir: str, config: dict) -> list[dict]:
+def generate_from_scenario(scenario_path: str, output_dir: str, config: dict) -> tuple[list[dict], dict[str, list[dict]]]:
     with open(scenario_path) as f:
         scenario = json.load(f)
     tts_cfg = config.get("tts", {})
@@ -97,6 +114,7 @@ def generate_from_scenario(scenario_path: str, output_dir: str, config: dict) ->
     out.mkdir(parents=True, exist_ok=True)
 
     results = []
+    native_timestamps = {}
     for scene in scenario.get("scenes", []):
         narration = scene.get("narration", "")
         if not narration.strip():
@@ -104,7 +122,7 @@ def generate_from_scenario(scenario_path: str, output_dir: str, config: dict) ->
         scene_id = scene.get("scene_id", "unknown")
         output_file = str(out / f"{scene_id}.wav")
         try:
-            _tts_generate(narration, output_file, provider, config)
+            _, words = _tts_generate(narration, output_file, provider, config)
             import subprocess
             probe = subprocess.run(
                 ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", output_file],
@@ -116,10 +134,19 @@ def generate_from_scenario(scenario_path: str, output_dir: str, config: dict) ->
             except ValueError:
                 pass
             results.append({"scene_id": scene_id, "path": output_file, "duration_s": dur})
-            print(f"  {scene_id}: {dur:.1f}s")
+            if words:
+                native_timestamps[scene_id] = {"words": words, "audio": output_file}
+            print(f"  {scene_id}: {dur:.1f}s" + (f" ({len(words)} native timestamps)" if words else ""))
         except Exception as exc:
             print(f"[tts] Failed for {scene_id}: {exc}", file=sys.stderr)
-    return results
+
+    if native_timestamps:
+        ts_path = str(out.parent / "timestamps-native.json")
+        with open(ts_path, "w") as f:
+            json.dump(native_timestamps, f, indent=2, ensure_ascii=False)
+        print(f"Native timestamps saved to: {ts_path}")
+
+    return results, native_timestamps
 
 
 def main():
@@ -159,14 +186,16 @@ def main():
         print(f"Testing {provider}...")
         if instruct:
             print(f"  Voice: {instruct}")
-        _tts_generate(text, output, provider, {**config, "tts": {**tts_cfg, "instruct": instruct}})
+        _, words = _tts_generate(text, output, provider, {**config, "tts": {**tts_cfg, "instruct": instruct}})
         print(f"Test audio saved to: {output}")
+        if words:
+            print(f"  {len(words)} native timestamps available")
         return
 
     if args.input:
         output_dir = args.output_dir or str(Path(args.input).parent / "audio")
         merged_cfg = {**config, "tts": {**tts_cfg, "instruct": instruct}}
-        results = generate_from_scenario(args.input, output_dir, merged_cfg)
+        results, _ = generate_from_scenario(args.input, output_dir, merged_cfg)
         if args.json:
             print(json.dumps(results, indent=2))
         else:
@@ -175,8 +204,10 @@ def main():
         return
 
     if args.text and args.output:
-        _tts_generate(args.text, args.output, provider, {**config, "tts": {**tts_cfg, "instruct": instruct}})
+        _, words = _tts_generate(args.text, args.output, provider, {**config, "tts": {**tts_cfg, "instruct": instruct}})
         print(f"Audio saved to: {args.output}")
+        if words:
+            print(f"  {len(words)} native timestamps available (use --input mode for auto-save)")
         return
 
     parser.print_help()

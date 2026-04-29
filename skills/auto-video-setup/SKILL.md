@@ -10,10 +10,11 @@ When the user says "setup auto-video", "install auto-video", "configure auto-vid
 
 You are an interactive setup agent. You will guide the user through configuring auto-video step by step. At the end, the user's system will have:
 
-- All 5 auto-video skills installed in `~/.agents/skills/`
+- All 7 auto-video skills installed in `~/.agents/skills/`
 - Helpers configured in `~/.config/auto-video/helpers/`
 - A valid `~/.config/auto-video/config.yaml`
 - Remotion installed (optional)
+- YouTube upload configured (optional)
 
 ## Setup flow
 
@@ -156,7 +157,60 @@ If yes:
 
 ---
 
-### Phase 4: Save configuration
+### Phase 4: YouTube upload (optional)
+
+Ask the user:
+
+> **Do you want to enable YouTube uploads?**
+> This lets you send finished videos directly to your YouTube channel from the pipeline.
+> You'll need a Google Cloud project with the YouTube Data API v3 enabled and an OAuth 2.0 client secret.
+>
+> y/n?
+
+If yes:
+
+1. Ask the user for the path to their OAuth 2.0 client secret JSON file. If they don't have one:
+   - Guide them to https://console.cloud.google.com/
+   - Create or select a project
+   - Enable "YouTube Data API v3" in the API Library
+   - Go to "Credentials" → "Create Credentials" → "OAuth client ID"
+   - Application type: "Web application"
+   - Add authorized redirect URI: `http://127.0.0.1:7777/`
+   - Download the JSON file
+
+2. Copy the client secret to the config directory:
+   ```bash
+   cp <path-to-client-secret> ~/.config/auto-video/youtube_client_secret.json
+   chmod 600 ~/.config/auto-video/youtube_client_secret.json
+   ```
+
+3. Install dependencies:
+   ```bash
+   pip install google-api-python-client google-auth-oauthlib
+   ```
+
+4. Test authentication:
+   ```bash
+   python3 ~/.config/auto-video/helpers/youtube-upload.py auth \
+     --client-secret ~/.config/auto-video/youtube_client_secret.json \
+     --host 127.0.0.1 --port 7777
+   ```
+   This opens a browser for OAuth consent. After the user authorizes, credentials are saved automatically.
+
+5. Verify by fetching channel info:
+   ```bash
+   python3 ~/.config/auto-video/helpers/youtube-upload.py info \
+     --config ~/.config/auto-video/config.yaml
+   ```
+
+6. Ask about defaults:
+   - **Default privacy**: `private` (safe default), `unlisted`, or `public`
+   - **Default license**: `creativeCommon` or `youtube`
+   - **Notify subscribers on upload?** y/n
+
+---
+
+### Phase 5: Save configuration
 
 Write the final config to `~/.config/auto-video/config.yaml`:
 
@@ -189,6 +243,19 @@ remotion:
   enabled: <true|false>
   project_path: ~/.config/auto-video/remotion
 
+youtube:
+  enabled: <true|false>
+  client_secret: ~/.config/auto-video/youtube_client_secret.json
+  credentials_file: ~/.config/auto-video/youtube_credentials.json
+  redirect_host: "127.0.0.1"
+  redirect_port: 7777
+  default_privacy: <private|unlisted|public>
+  default_tags: []
+  default_category_id: "22"
+  default_license: <creativeCommon|youtube>
+  notify_subscribers: <true|false>
+  made_for_kids: false
+
 paths:
   helpers: ~/.config/auto-video/helpers
   cache: ~/.config/auto-video/cache
@@ -214,7 +281,7 @@ chmod +x ~/.config/auto-video/helpers/*
 
 ---
 
-### Phase 5: Final verification
+### Phase 6: Final verification
 
 Run a full integration test:
 ```bash
@@ -227,8 +294,17 @@ If Remotion enabled:
 npx remotion render ~/.config/auto-video/remotion/index.ts Intro ~/Downloads/test_intro.mp4 --props '{"title":"Test","subtitle":"Auto-Video Setup","accentColor":"#7ad7ff"}'
 ```
 
+If YouTube enabled:
+```bash
+python3 ~/.config/auto-video/helpers/youtube-upload.py info \
+  --config ~/.config/auto-video/config.yaml
+```
+
 Tell the user:
 > Setup complete! You can now ask your AI agent to generate videos. Try: "Make a 60-second video about the latest AI news"
+
+If YouTube was configured, add:
+> YouTube uploads are ready. After generating a video, say "upload it to YouTube" to publish directly.
 
 ---
 

@@ -27,6 +27,19 @@ remotion:
   enabled: false
   project_path: ~/.config/auto-video/remotion
 
+youtube:
+  enabled: false
+  client_secret: ~/.config/auto-video/youtube_client_secret.json
+  credentials_file: ~/.config/auto-video/youtube_credentials.json
+  redirect_host: "127.0.0.1"
+  redirect_port: 7777
+  default_privacy: private
+  default_tags: []
+  default_category_id: "22"
+  default_license: creativeCommon
+  notify_subscribers: true
+  made_for_kids: false
+
 paths:
   helpers: ~/.config/auto-video/helpers
   cache: ~/.config/auto-video/cache

@@ -38,11 +38,13 @@ Your request
     |   |
     |   +-- [Typography] -- cinematic text overlays (optional)
     |
+    +-- [YouTube] -- upload to YouTube (optional)
+    |
     v
 Finished video (.mp4)
 ```
 
-### The 6 skills
+### The 7 skills
 
 | Skill | What it does |
 |-------|-------------|
@@ -52,6 +54,7 @@ Finished video (.mp4)
 | **scenarist** | Plans visuals, phrase groups, timing, asset queries |
 | **montage** | Pre-render validation, FFmpeg/Remotion assembly |
 | **typography** | Cinematic text overlays with fonts, presets, animations |
+| **youtube** | Upload finished videos directly to YouTube |
 
 ### What's included by default
 
@@ -79,6 +82,19 @@ If you have an NVIDIA GPU (recommended 2GB+ VRAM):
 - OmniVoice TTS runs locally, no API needed
 - GPU tasks run sequentially (TTS -> Whisper timestamps -> media generation)
 - Automatic fallback to edge-tts if GPU is busy or unavailable
+
+### YouTube uploads
+
+Upload finished videos directly to your YouTube channel:
+- OAuth 2.0 authentication (one-time browser consent)
+- Auto-filled metadata: title, description, tags from the pipeline
+- Privacy control: private (default), unlisted, or public
+- Category auto-detection from video sector (tech, education, etc.)
+- Creative Commons or standard YouTube license
+- Scheduled publishing support
+- Channel statistics and info
+
+Setup: during auto-video-setup, enable YouTube and provide your Google Cloud OAuth client secret (with YouTube Data API v3 enabled and redirect URI `http://127.0.0.1:7777/`).
 
 ## Installation
 
@@ -145,6 +161,12 @@ video:
 
 remotion:
   enabled: false
+
+youtube:
+  enabled: false
+  client_secret: ~/.config/auto-video/youtube_client_secret.json
+  default_privacy: private
+  default_license: creativeCommon
 ```
 
 ## Modularity
@@ -162,6 +184,7 @@ Everything is swappable:
 - FFmpeg (`apt install ffmpeg` or `brew install ffmpeg`)
 - NVIDIA GPU recommended for local TTS (not required — edge-tts works without one)
 - API keys: Pexels (free), optionally ElevenLabs or OpenAI
+- For YouTube uploads: `google-api-python-client`, `google-auth-oauthlib`, and a Google Cloud OAuth client secret
 
 ## Project structure
 
@@ -174,6 +197,7 @@ auto-video/
     auto-video-scenarist/SKILL.md
     auto-video-montage/SKILL.md
     auto-video-typography/SKILL.md
+    auto-video-youtube/SKILL.md
     shared/
       helpers/
         fetch-media.py
@@ -181,6 +205,7 @@ auto-video/
         tts-timestamps.py
         video-compose.py
         recalibrate-timestamps.py
+        youtube-upload.py
       templates/
         config.yaml.example
         remotion-templates/

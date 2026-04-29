@@ -10,3 +10,6 @@ build/
 *.mp4
 *.wav
 *.mp3
+youtube_client_secret*.json
+youtube_credentials.json
+client_secret*.json
