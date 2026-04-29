@@ -1,3 +1,8 @@
+---
+name: auto-video-typography
+description: Typography and text overlay design for auto-video - creates cinematic text, subtitles, and visual emphasis
+---
+
 # Auto-Video Typography
 
 Handles cinematic text overlays, typography, and animated text for video production.

@@ -1,3 +1,8 @@
+---
+name: auto-video-writer
+description: Research a topic and write engaging, well-researched video scripts with humor and insights
+---
+
 # Auto-Video Writer
 
 Skill for researching a topic and writing an engaging video script.

@@ -1,3 +1,8 @@
+---
+name: auto-video-montage
+description: Assemble video from scenario + media + audio using FFmpeg or Remotion for final video production
+---
+
 # Auto-Video Montage
 
 Assembles the final video from scenario, media assets, audio, and timestamps.

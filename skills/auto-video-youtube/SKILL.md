@@ -1,3 +1,8 @@
+---
+name: auto-video-youtube
+description: YouTube upload and management for auto-video - handles video uploads, metadata, and publishing
+---
+
 # Auto-Video YouTube
 
 Upload finished videos to YouTube directly from the pipeline. Handles OAuth 2.0 authentication, metadata, and upload.

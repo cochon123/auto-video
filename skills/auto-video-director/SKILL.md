@@ -1,3 +1,8 @@
+---
+name: auto-video-director
+description: Main orchestration skill for automated video production - coordinates writer, scenarist, and montage
+---
+
 # Auto-Video Director
 
 Main orchestration skill for video generation. This is the skill the user interacts with when they want to create a video.

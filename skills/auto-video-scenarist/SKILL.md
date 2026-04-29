@@ -1,3 +1,8 @@
+---
+name: auto-video-scenarist
+description: Visual scenarist - transforms scripts into visual production plans with assets, transitions, and text groupings
+---
+
 # Auto-Video Scenarist — Visual Pass
 
 Transforms a script into a visual production plan with assets, modes, transitions, and text groupings. **No timestamps** — timing comes from actual audio.

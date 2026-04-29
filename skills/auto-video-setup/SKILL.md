@@ -1,3 +1,8 @@
+---
+name: auto-video-setup
+description: Auto-video setup skill for configuring all auto-video skills and helpers
+---
+
 # Auto-Video Setup
 
 Interactive setup skill that configures all auto-video skills and helpers for the user's system.
