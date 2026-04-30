@@ -26,17 +26,9 @@ auto-video is a **skill-based architecture** — not a library, not a CLI. Each 
 Your request
     |
     v
-[Director] -- analyzes intent, delegates work
-    |
-    +-- [Writer] -- researches topic, writes script
-    |
-    +-- [Scenarist] -- plans visuals, phrase groups, timing
+[auto-video] -- research, script, scenario, assembly, delivery
     |
     +-- [Helpers] -- fetch media, generate TTS, timestamps
-    |
-    +-- [Montage] -- validates assets, assembles video
-    |   |
-    |   +-- [Typography] -- cinematic text overlays (optional)
     |
     +-- [YouTube] -- upload to YouTube (optional)
     |
@@ -44,37 +36,30 @@ Your request
 Finished video (.mp4)
 ```
 
-### The 7 skills
+### The 3 skills
 
 | Skill | What it does |
 |-------|-------------|
-| **setup** | Interactive setup: config, API keys, GPU check |
-| **director** | Main orchestration — understands your request, runs the pipeline |
-| **writer** | Researches a topic and writes a narrated script |
-| **scenarist** | Plans visuals, phrase groups, timing, asset queries |
-| **montage** | Pre-render validation, FFmpeg/Remotion assembly |
-| **typography** | Cinematic text overlays with fonts, presets, animations |
-| **youtube** | Upload finished videos directly to YouTube |
+| **auto-video** | Main pipeline: research, script writing, visual scenario, media assembly, delivery |
+| **auto-video-setup** | Interactive setup: config, API keys, GPU check |
+| **auto-video-youtube** | Upload finished videos directly to YouTube |
 
 ### What's included by default
 
 | Component | Default | Alternatives |
 |-----------|---------|-------------|
-| **TTS** | OmniVoice (local, GPU, 600+ languages, 1.9GB VRAM) | edge-tts (free, cloud), ElevenLabs, OpenAI TTS |
+| **TTS** | OpenAI TTS (cloud) | edge-tts (free), OmniVoice (local, GPU), ElevenLabs |
 | **Media** | Pexels (free API) + DuckDuckGo Images | Pixabay, AI-generated |
 | **Assembly** | FFmpeg (always available) | Remotion (React-based, more control) |
-| **Subtitles** | Phrase groups (auto-generated, synced to narration) | SRT, burned-in |
+| **Subtitles** | Simple bottom subtitles (synced to narration) | Dramatic (cinematic text), Educational (term highlights) |
 | **Resolution** | 1920x1080 @ 30fps | Configurable |
-| **Languages** | French (default) | Any language OmniVoice/edge-tts supports |
+| **Languages** | French (default) | Any language your TTS supports |
 
-### Typography & cinematic mode
+### Text overlay modes
 
-When you request a "cinematic" or "dramatic" video:
-- Text overlays with Google Fonts (Bebas Neue, Playfair Display, Inter, Oswald)
-- 4 presets: epic, minimal, corporate, cinematic
-- 4 animations: fade, slide, scale, typewriter
-- Adaptive sizing based on phrase length
-- Phrase groups never split mid-expression
+- **Simple (default):** Bottom subtitles, clean sans-serif, fade in/out. Text supports the visual.
+- **Dramatic:** BIG cinematic text, display fonts (Bebas Neue, Playfair Display), heavy animations, accent color highlights on key words. Text IS the visual.
+- **Educational:** Centered key terms, large bold font, scale animations, accent borders. Text reinforces learning.
 
 ### GPU management
 
@@ -92,7 +77,6 @@ Upload finished videos directly to your YouTube channel:
 - Category auto-detection from video sector (tech, education, etc.)
 - Creative Commons or standard YouTube license
 - Scheduled publishing support
-- Channel statistics and info
 
 Setup: during auto-video-setup, enable YouTube and provide your Google Cloud OAuth client secret (with YouTube Data API v3 enabled and redirect URI `http://127.0.0.1:7777/`).
 
@@ -130,10 +114,12 @@ nano ~/.config/auto-video/config.yaml
 ### What gets installed
 
 ```
-~/.agents/skills/auto-video-{setup,director,writer,scenarist,montage,typography}/
+~/.agents/skills/auto-video/
+~/.agents/skills/auto-video-setup/
+~/.agents/skills/auto-video-youtube/
 ~/.config/auto-video/
   config.yaml          # your configuration (API keys, TTS, language)
-  helpers/             # Python/Shell helpers
+  helpers/             # Python helpers
   cache/               # media + audio cache
 ```
 
@@ -143,28 +129,27 @@ Config lives at `~/.config/auto-video/config.yaml`:
 
 ```yaml
 tts:
-  provider: omnivoice          # omnivoice | edge | elevenlabs | openai
-  instruct: "female, young adult, moderate pitch"
+  provider: openai             # openai | edge | omnivoice | elevenlabs
+  voice: alloy
   language: fr
 
 media:
-  mode: stock                  # stock | generate | hybrid
-  sources:
-    - pexels
-    - duckduckgo
-  pexels_api_key: null
+  mode: api                    # api | local | generated | hybrid
+  providers:
+    - name: pexels
+      api_key: null
+    - name: duckduckgo
 
 video:
-  resolution: 1920x1080
-  fps: 30
-  format: mp4
+  default_format: short        # short | long
+  default_language: fr
+  gpu_acceleration: auto
 
 remotion:
   enabled: false
 
 youtube:
   enabled: false
-  client_secret: ~/.config/auto-video/youtube_client_secret.json
   default_privacy: private
   default_license: creativeCommon
 ```
@@ -172,7 +157,7 @@ youtube:
 ## Modularity
 
 Everything is swappable:
-- **TTS provider**: Switch between OmniVoice (local), edge-tts (free cloud), ElevenLabs, or OpenAI by changing one config line
+- **TTS provider**: Switch between OpenAI, edge-tts, OmniVoice, or ElevenLabs by changing one config line
 - **Media sources**: Pexels, DuckDuckGo, Pixabay, AI generation — mix and match
 - **Assembly engine**: FFmpeg for reliability, Remotion for creative control
 - **Skills**: Each skill is a standalone markdown file — edit, extend, or replace any of them
@@ -182,7 +167,7 @@ Everything is swappable:
 
 - Python 3.10+
 - FFmpeg (`apt install ffmpeg` or `brew install ffmpeg`)
-- NVIDIA GPU recommended for local TTS (not required — edge-tts works without one)
+- NVIDIA GPU recommended for local TTS (not required — edge-tts and OpenAI work without one)
 - API keys: Pexels (free), optionally ElevenLabs or OpenAI
 - For YouTube uploads: `google-api-python-client`, `google-auth-oauthlib`, and a Google Cloud OAuth client secret
 
@@ -191,18 +176,16 @@ Everything is swappable:
 ```
 auto-video/
   skills/
-    auto-video-setup/SKILL.md
-    auto-video-director/SKILL.md
-    auto-video-writer/SKILL.md
-    auto-video-scenarist/SKILL.md
-    auto-video-montage/SKILL.md
-    auto-video-typography/SKILL.md
-    auto-video-youtube/SKILL.md
+    auto-video/SKILL.md          # main pipeline
+    auto-video-setup/SKILL.md    # interactive setup
+    auto-video-youtube/SKILL.md  # YouTube upload
     shared/
       helpers/
         fetch-media.py
         tts-generate.py
         tts-timestamps.py
+        build-phrase-groups.py
+        validate-assets.py
         video-compose.py
         recalibrate-timestamps.py
         youtube-upload.py
