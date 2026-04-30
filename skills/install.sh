@@ -35,7 +35,7 @@ mkdir -p "$HOME/Videos/auto-video"
 
 # Install skills to ~/.agents/skills/
 echo "Installing skills to $AGENTS_DIR ..."
-for skill_dir in "$SKILLS_DIR"/auto-video-*; do
+for skill_dir in "$SKILLS_DIR"/auto-video*; do
   if [ -d "$skill_dir" ]; then
     skill_name="$(basename "$skill_dir")"
     echo "  -> $skill_name"
@@ -48,7 +48,7 @@ done
 if [ "$INSTALL_OPENCODE" = true ] || [ "$INSTALL_ALL" = true ]; then
   echo "Installing skills to $OPENCODE_DIR ..."
   mkdir -p "$OPENCODE_DIR"
-  for skill_dir in "$SKILLS_DIR"/auto-video-*; do
+  for skill_dir in "$SKILLS_DIR"/auto-video*; do
     if [ -d "$skill_dir" ]; then
       skill_name="$(basename "$skill_dir")"
       echo "  -> $skill_name"
@@ -82,13 +82,9 @@ echo ""
 echo "=== Installation complete ==="
 echo ""
 echo "Skills installed:"
-echo "  - auto-video-setup     (interactive setup)"
-echo "  - auto-video-director  (main orchestration)"
-echo "  - auto-video-writer    (research + script writing)"
-echo "  - auto-video-scenarist (visual scenario planning)"
-echo "  - auto-video-montage   (video assembly)"
-echo "  - auto-video-typography (cinematic text overlays)"
-echo "  - auto-video-youtube   (YouTube upload)"
+echo "  - auto-video          (main pipeline: research, script, scenario, assembly)"
+echo "  - auto-video-setup    (interactive setup)"
+echo "  - auto-video-youtube  (YouTube upload)"
 echo ""
 echo "Helpers installed to: $HELPERS_DIR"
 echo "Config: $CONFIG_DIR/config.yaml"

@@ -1,228 +1,115 @@
 ---
 name: auto-video-setup
-description: Auto-video setup skill for configuring all auto-video skills and helpers
+description: Interactive setup for configuring auto-video — media sources, TTS, Remotion, YouTube
 ---
 
 # Auto-Video Setup
 
-Interactive setup skill that configures all auto-video skills and helpers for the user's system.
+Interactive setup that configures auto-video for the user's system.
 
 ## When to use
 
-When the user says "setup auto-video", "install auto-video", "configure auto-video", or when auto-video helpers are missing/broken.
+When the user says "setup auto-video", "install auto-video", "configure auto-video", or when helpers/config are missing.
 
-## Overview
+## What gets configured
 
-You are an interactive setup agent. You will guide the user through configuring auto-video step by step. At the end, the user's system will have:
-
-- All 7 auto-video skills installed in `~/.agents/skills/`
-- Helpers configured in `~/.config/auto-video/helpers/`
-- A valid `~/.config/auto-video/config.yaml`
+- Helpers installed in `~/.config/auto-video/helpers/`
+- Valid `~/.config/auto-video/config.yaml`
 - Remotion installed (optional)
 - YouTube upload configured (optional)
 
-## Setup flow
-
-Execute these steps IN ORDER. At each step, ask the user for input before proceeding.
+Execute these phases IN ORDER. Ask the user for input at each step.
 
 ---
 
-### Phase 0: Install skills
+## Phase 1: Install skills + helpers
 
-1. Copy all auto-video skill folders to `~/.agents/skills/`:
-   ```bash
-   mkdir -p ~/.agents/skills
-   cp -r <repo>/skills/auto-video-* ~/.agents/skills/
-   ```
-2. If the user uses opencode specifically, ALSO copy to `~/.config/opencode/skill/`:
-   ```bash
-   mkdir -p ~/.config/opencode/skill
-   cp -r <repo>/skills/auto-video-* ~/.config/opencode/skill/
-   ```
-3. Tell the user: "Skills installed. Now let's configure each module."
+```bash
+# Skills
+mkdir -p ~/.agents/skills
+cp -r <repo>/skills/auto-video* ~/.agents/skills/
 
----
+# If using opencode
+mkdir -p ~/.config/opencode/skill
+cp -r <repo>/skills/auto-video* ~/.config/opencode/skill/
 
-### Phase 1: Media sources
+# Helpers
+mkdir -p ~/.config/auto-video/{helpers,cache}
+mkdir -p ~/Videos/auto-video
+cp <repo>/skills/shared/helpers/* ~/.config/auto-video/helpers/
+chmod +x ~/.config/auto-video/helpers/*
+```
 
-Ask the user:
-
-> **How should the agent fetch media (images/videos) for video scenes?**
->
-> 1. **API** — fetch from stock photo/video APIs (default: Pexels for artistic, DuckDuckGo for factual)
-> 2. **Local folder** — use media already present on disk
-> 3. **AI generation** — generate images with a local or API model
-> 4. **Combination** — mix of the above
-
-Based on their answer:
-
-#### If API selected:
-- Ask which services. Default options: **Pexels** (artistic/stock), **DuckDuckGo** (factual/photo-only), **Pixabay**.
-- For Pexels/Pixabay: ask for API key. Test with:
-  ```bash
-  python3 ~/.config/auto-video/helpers/fetch-media.py --test pexels --api-key <KEY>
-  ```
-- For DuckDuckGo: no key needed, just test:
-  ```bash
-  python3 ~/.config/auto-video/helpers/fetch-media.py --test duckduckgo
-  ```
-
-#### If local folder selected:
-- Ask for the path to their media folder.
-- Verify it exists and has files: `ls <path> | head -5`
-
-#### If AI generation selected:
-- Ask: **Local model** or **API**?
-  - **Local**: Search the web for how to run image generation with their hardware. Ask where their model is stored. Common tools: `diffusers` (Python), ComfyUI, Automatic1111. Test generation.
-  - **API**: Default to OpenAI DALL-E / Stability AI. Ask for API key. Test with a simple prompt.
-
-#### If combination:
-- Go through each sub-option above as needed.
+If config doesn't exist yet:
+```bash
+cp <repo>/skills/shared/templates/config.yaml.example ~/.config/auto-video/config.yaml
+chmod 600 ~/.config/auto-video/config.yaml
+```
 
 ---
 
-### Phase 2: Text-to-Speech
+## Phase 2: Media sources
 
-Ask the user:
+Ask: **How should the agent fetch media?**
 
-> **How should the agent generate voice narration?**
->
-> 1. **Local TTS (OmniVoice)** — GPU-accelerated, 600+ languages, voice design via instruct attributes (e.g. "female, young adult, british accent"). No API key needed. Needs ~1.9GB VRAM.
-> 2. **Edge TTS** — free, uses Microsoft Edge API. No API key, no GPU needed. Good fallback for low-VRAM systems.
-> 3. **API TTS** — cloud service (ElevenLabs, OpenAI TTS)
-> 4. **I already have audio files** — skip TTS, provide audio manually
+1. **API** — Pexels (artistic), DuckDuckGo (factual, no key needed), Pixabay
+2. **Local folder** — use existing media on disk
+3. **AI generation** — local (diffusers, ComfyUI) or API (DALL-E, Stability)
+4. **Combination** — mix of the above
 
-Based on their answer:
-
-#### If Local TTS (OmniVoice) — default:
-- Ask: **What voice instruct do you want?** Valid attributes: male, female, child, teenager, young adult, middle-aged, elderly, low pitch, moderate pitch, high pitch, very low pitch, very high pitch, whisper, american accent, british accent, australian accent, canadian accent, indian accent, japanese accent, korean accent, portuguese accent, russian accent. Comma-separated, e.g. "female, young adult, british accent"
-- Check GPU VRAM: `nvidia-smi --query-gpu=memory.total --format=csv,noheader`. If < 2GB, recommend Edge TTS instead.
-- Test: generate sample audio (24kHz WAV) and save to `~/Downloads/tts_test.wav`:
-  ```bash
-  python3 ~/.config/auto-video/helpers/tts-generate.py \
-    --text "Hello world, let's vibe edit a video" \
-    --output ~/Downloads/tts_test.wav \
-    --provider omnivoice \
-    --instruct "<user's voice instruct, e.g. female, young adult, moderate pitch>" \
-    --config ~/.config/auto-video/config.yaml
-  ```
-- Ask the user to listen and confirm.
-
-#### If Edge TTS:
-- Ask for the voice name (default: `en-US-AvaNeural` for English, `fr-FR-DeniseNeural` for French).
-- Test:
-  ```bash
-  python3 ~/.config/auto-video/helpers/tts-generate.py \
-    --text "Hello world, let's vibe edit a video" \
-    --output ~/Downloads/tts_test.wav \
-    --provider edge --voice "<voice>"
-  ```
-- Ask the user to listen and confirm.
-
-#### If API TTS:
-- Ask which provider (ElevenLabs, OpenAI TTS, etc.)
-- Ask for API key and preferred voice.
-- Test: generate "Hello world, let's vibe edit a video" and save to `~/Downloads/tts_test.wav`:
-  ```bash
-  python3 ~/.config/auto-video/helpers/tts-generate.py \
-    --text "Hello world, let's vibe edit a video" \
-    --output ~/Downloads/tts_test.wav \
-    --provider <provider> --api-key <KEY> --voice <voice>
-  ```
-- Ask the user to listen and confirm.
+For API: test with `python3 ~/.config/auto-video/helpers/fetch-media.py --test <source> [--api-key <KEY>]`
+For local: verify path exists and has files
+For AI generation: search for setup instructions matching their hardware, test generation
 
 ---
 
-### Phase 3: Remotion (optional)
+## Phase 3: Text-to-Speech
 
-Ask the user:
+Ask: **How should the agent generate voice narration?**
 
-> **Do you want to install Remotion for advanced motion graphics?**
-> This enables animated intros, data visualizations, semantic motion scenes, etc.
-> Without it, videos will use simple FFmpeg transitions (fade/dissolve).
->
-> y/n?
+1. **Local TTS (OmniVoice)** — GPU-accelerated, ~1.9GB VRAM, voice design via instruct attributes
+2. **Edge TTS** — free Microsoft Edge API, no GPU needed, good fallback
+3. **API TTS** — cloud service (ElevenLabs, OpenAI TTS)
+4. **Manual** — skip TTS, provide audio files
+
+For OmniVoice: check GPU VRAM (`nvidia-smi`), test with `--provider omnivoice --instruct "female, young adult, moderate pitch"`
+For Edge TTS: test with `--provider edge --voice "en-US-AvaNeural"`
+For API: test with `--provider <provider> --api-key <KEY> --voice <voice>`
+
+Save test audio to `~/Downloads/tts_test.wav`, ask user to confirm.
+
+---
+
+## Phase 4: Remotion (optional)
+
+Ask: **Install Remotion for advanced motion graphics?** (y/n)
 
 If yes:
-1. Check Node.js: `node --version` (need >=18)
-2. Install Remotion project to `~/.config/auto-video/remotion/`:
-   ```bash
-   mkdir -p ~/.config/auto-video/remotion
-   cp -r <repo>/skills/shared/templates/remotion-templates/* ~/.config/auto-video/remotion/
-   cd ~/.config/auto-video/remotion && npm install
-   ```
+1. Check Node.js >= 18: `node --version`
+2. Install: `cp -r <repo>/skills/shared/templates/remotion-templates/* ~/.config/auto-video/remotion/ && cd ~/.config/auto-video/remotion && npm install`
 3. Verify: `npx remotion versions`
-4. Load the remotion-render and remotion-best-practices skills:
-   ```bash
-   # These should already be in ~/.agents/skills/ if installed
-   ls ~/.agents/skills/remotion-render/SKILL.md
-   ls ~/.agents/skills/remotion-best-practices/SKILL.md
-   ```
-5. If missing, tell the user to install them.
 
 ---
 
-### Phase 4: YouTube upload (optional)
+## Phase 5: YouTube upload (optional)
 
-Ask the user:
-
-> **Do you want to enable YouTube uploads?**
-> This lets you send finished videos directly to your YouTube channel from the pipeline.
-> You'll need a Google Cloud project with the YouTube Data API v3 enabled and an OAuth 2.0 client secret.
->
-> y/n?
+Ask: **Enable YouTube uploads?** (y/n)
 
 If yes:
-
-1. Ask the user for the path to their OAuth 2.0 client secret JSON file. If they don't have one:
-   - Guide them to https://console.cloud.google.com/
-   - Create or select a project
-   - Enable "YouTube Data API v3" in the API Library
-   - Go to "Credentials" → "Create Credentials" → "OAuth client ID"
-   - Application type: "Web application"
-   - Add authorized redirect URI: `http://127.0.0.1:7777/`
-   - Download the JSON file
-
-2. Copy the client secret to the config directory:
-   ```bash
-   cp <path-to-client-secret> ~/.config/auto-video/youtube_client_secret.json
-   chmod 600 ~/.config/auto-video/youtube_client_secret.json
-   ```
-
-3. Install dependencies:
-   ```bash
-   pip install google-api-python-client google-auth-oauthlib
-   ```
-
-4. Test authentication:
-   ```bash
-   python3 ~/.config/auto-video/helpers/youtube-upload.py auth \
-     --client-secret ~/.config/auto-video/youtube_client_secret.json \
-     --host 127.0.0.1 --port 7777
-   ```
-   This opens a browser for OAuth consent. After the user authorizes, credentials are saved automatically.
-
-5. Verify by fetching channel info:
-   ```bash
-   python3 ~/.config/auto-video/helpers/youtube-upload.py info \
-     --config ~/.config/auto-video/config.yaml
-   ```
-
-6. Ask about defaults:
-   - **Default privacy**: `private` (safe default), `unlisted`, or `public`
-   - **Default license**: `creativeCommon` or `youtube`
-   - **Notify subscribers on upload?** y/n
+1. Need OAuth 2.0 client secret from Google Cloud Console (YouTube Data API v3, redirect URI `http://127.0.0.1:7777/`)
+2. Copy to `~/.config/auto-video/youtube_client_secret.json`, chmod 600
+3. Install: `pip install google-api-python-client google-auth-oauthlib`
+4. Authenticate: `python3 ~/.config/auto-video/helpers/youtube-upload.py auth --client-secret ~/.config/auto-video/youtube_client_secret.json --host 127.0.0.1 --port 7777`
+5. Verify: `python3 ~/.config/auto-video/helpers/youtube-upload.py info --config ~/.config/auto-video/config.yaml`
+6. Ask defaults: privacy (private/unlisted/public), license (creativeCommon/youtube), notify subscribers
 
 ---
 
-### Phase 5: Save configuration
+## Phase 6: Save config + verify
 
-Write the final config to `~/.config/auto-video/config.yaml`:
+Write final `~/.config/auto-video/config.yaml` with all chosen settings. Schema:
 
 ```yaml
-# Auto-Video Configuration
-# Generated by auto-video-setup
-
 media:
   mode: <api|local|generated|hybrid>
   providers:
@@ -234,13 +121,11 @@ media:
     mode: <local|api>
     model: <model_name>
     api_key: <KEY or null>
-    model_path: <path or null>
 
 tts:
-  mode: <local|api|manual>
-  provider: <omnivoice|edge|elevenlabs|openai>
-  voice: <voice_name or null>
-  instruct: <voice attributes for OmniVoice, e.g. "female, young adult, moderate pitch">
+  mode: <api|local|manual>
+  provider: <openai|omnivoice|edge|elevenlabs>
+  voice: <voice or null>
   api_key: <KEY or null>
   language: <lang>
 
@@ -255,11 +140,7 @@ youtube:
   redirect_host: "127.0.0.1"
   redirect_port: 7777
   default_privacy: <private|unlisted|public>
-  default_tags: []
-  default_category_id: "22"
   default_license: <creativeCommon|youtube>
-  notify_subscribers: <true|false>
-  made_for_kids: false
 
 paths:
   helpers: ~/.config/auto-video/helpers
@@ -272,51 +153,16 @@ video:
   gpu_acceleration: auto
 ```
 
-Create required directories:
-```bash
-mkdir -p ~/.config/auto-video/{helpers,cache}
-mkdir -p ~/Videos/auto-video
-```
-
-Install helpers:
-```bash
-cp <repo>/skills/shared/helpers/* ~/.config/auto-video/helpers/
-chmod +x ~/.config/auto-video/helpers/*
-```
-
----
-
-### Phase 6: Final verification
-
-Run a full integration test:
+Run verification:
 ```bash
 python3 ~/.config/auto-video/helpers/fetch-media.py --test-all
 python3 ~/.config/auto-video/helpers/tts-generate.py --test --config ~/.config/auto-video/config.yaml
 ```
 
-If Remotion enabled:
-```bash
-npx remotion render ~/.config/auto-video/remotion/index.ts Intro ~/Downloads/test_intro.mp4 --props '{"title":"Test","subtitle":"Auto-Video Setup","accentColor":"#7ad7ff"}'
-```
+Tell the user: **Setup complete! Try: "Make a 60-second video about the latest AI news"**
 
-If YouTube enabled:
-```bash
-python3 ~/.config/auto-video/helpers/youtube-upload.py info \
-  --config ~/.config/auto-video/config.yaml
-```
+## Notes
 
-Tell the user:
-> Setup complete! You can now ask your AI agent to generate videos. Try: "Make a 60-second video about the latest AI news"
-
-If YouTube was configured, add:
-> YouTube uploads are ready. After generating a video, say "upload it to YouTube" to publish directly.
-
----
-
-## Important notes
-
-- ALWAYS ask before running destructive commands or installing packages.
-- If a step fails, troubleshoot with the user before moving on.
-- Store API keys ONLY in `~/.config/auto-video/config.yaml` with `chmod 600`.
-- The config file is the single source of truth. All other skills read from it.
-- If the user's AI harness is opencode, skills should also be copied to `~/.config/opencode/skill/` for auto-discovery.
+- Ask before running destructive commands or installing packages
+- Store API keys ONLY in config.yaml with chmod 600
+- If a step fails, troubleshoot before moving on
